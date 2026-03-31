@@ -6,7 +6,7 @@
 		getExerciseSlots, getExerciseLogs, getExercise, getSetLogs,
 		finishWorkoutSession, createExerciseLog, getAlternatingExerciseId,
 		getLastPerformance, calculateProgression, createSetLog, getSettings,
-		getAllExerciseIdsForSlot, getIncrementProfile
+		getAllExerciseIdsForSlot, getIncrementProfile, deleteWorkoutSession
 	} from '$lib/store';
 	import { db } from '$lib/db';
 	import type { WorkoutSession, SplitDay, ExerciseSlot, ExerciseLog, SetLog, Exercise, Settings, IncrementProfile } from '$lib/types';
@@ -149,6 +149,30 @@
 		goto('/');
 	}
 
+	async function handleAbandonWorkout() {
+		if (!session) return;
+		await deleteWorkoutSession(session.id);
+		goto('/');
+	}
+
+	async function handleSkipExercise(slot: typeof slots[0]) {
+		if (!session) return;
+		// Create a log entry marked as finished immediately (skipped — 0 sets completed)
+		const nextOrder = slots.filter(s => s.log).length;
+		const eid = slot.suggestedExerciseId ?? slot.exerciseId;
+		const log = await createExerciseLog({
+			sessionId: session.id,
+			exerciseId: eid,
+			slotId: slot.id,
+			order: nextOrder
+		});
+		// Mark as finished right away (no sets)
+		await db.exerciseLogs.update(log.id, { finishedAt: new Date().toISOString() });
+		await loadSession();
+	}
+
+	let showAbandonConfirm = $state(false);
+
 	function getSlotStatusColor(slot: typeof slots[0]): string {
 		if (slot.done) return 'border-success';
 		if (slot.log) return 'border-warning';
@@ -165,13 +189,41 @@
 				<h1 class="text-xl font-bold">{splitDay.name}</h1>
 				<span class="text-text-muted text-sm">Duration: {elapsed}</span>
 			</div>
-			<button
-				onclick={handleFinishWorkout}
-				class="bg-danger hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-			>
-				Finish
-			</button>
+			<div class="flex gap-2">
+				<button
+					onclick={() => showAbandonConfirm = true}
+					class="text-text-muted hover:text-danger text-sm px-2 py-2 transition-colors"
+				>
+					Abandon
+				</button>
+				<button
+					onclick={handleFinishWorkout}
+					class="bg-danger hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+				>
+					Finish
+				</button>
+			</div>
 		</div>
+
+		{#if showAbandonConfirm}
+			<div class="bg-danger/10 rounded-xl p-4 border border-danger mb-4">
+				<p class="text-sm text-danger font-medium mb-3">Abandon this workout? All logged data will be deleted.</p>
+				<div class="flex gap-2">
+					<button
+						onclick={handleAbandonWorkout}
+						class="flex-1 bg-danger text-white py-2 rounded-lg text-sm font-medium"
+					>
+						Abandon
+					</button>
+					<button
+						onclick={() => showAbandonConfirm = false}
+						class="flex-1 bg-dark-surface text-text-secondary py-2 rounded-lg text-sm font-medium"
+					>
+						Cancel
+					</button>
+				</div>
+			</div>
+		{/if}
 
 		<div class="space-y-3">
 			{#each slots as slot}
@@ -203,13 +255,17 @@
 					{#if slot.done}
 						<!-- Show completed summary -->
 						<div class="space-y-1">
-							{#each slot.sets ?? [] as set}
-								{#if set.completed}
-									<div class="text-xs text-text-secondary">
-										Set {set.setNumber}: {set.actualWeight}kg × {set.actualReps} reps
-									</div>
-								{/if}
-							{/each}
+							{#if (slot.sets ?? []).filter(s => s.completed).length === 0}
+								<div class="text-xs text-text-muted italic">Skipped</div>
+							{:else}
+								{#each slot.sets ?? [] as set}
+									{#if set.completed}
+										<div class="text-xs text-text-secondary">
+											Set {set.setNumber}: {set.actualWeight}kg × {set.actualReps} reps
+										</div>
+									{/if}
+								{/each}
+							{/if}
 						</div>
 					{:else if slot.log}
 						<!-- Resume -->
@@ -247,6 +303,12 @@
 									Start
 								</button>
 							{/if}
+							<button
+								onclick={() => handleSkipExercise(slot)}
+								class="bg-dark-surface text-text-muted hover:text-text-secondary py-2 px-3 rounded-lg text-sm transition-colors"
+							>
+								Skip
+							</button>
 						</div>
 					{/if}
 				</div>

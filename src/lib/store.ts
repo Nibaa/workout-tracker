@@ -258,6 +258,28 @@ export async function finishWorkoutSession(id: string, notes?: string): Promise<
 	});
 }
 
+export async function updateWorkoutSession(id: string, updates: Partial<Omit<WorkoutSession, 'id'>>): Promise<void> {
+	await db.workoutSessions.update(id, updates);
+}
+
+export async function deleteWorkoutSession(id: string): Promise<void> {
+	const logs = await db.exerciseLogs.where('sessionId').equals(id).toArray();
+	for (const log of logs) {
+		await db.setLogs.where('exerciseLogId').equals(log.id).delete();
+	}
+	await db.exerciseLogs.where('sessionId').equals(id).delete();
+	await db.workoutSessions.delete(id);
+}
+
+export async function deleteExerciseLog(id: string): Promise<void> {
+	await db.setLogs.where('exerciseLogId').equals(id).delete();
+	await db.exerciseLogs.delete(id);
+}
+
+export async function deleteSetLog(id: string): Promise<void> {
+	await db.setLogs.delete(id);
+}
+
 // ─── Exercise Logs ───
 
 export async function getExerciseLogs(sessionId: string): Promise<ExerciseLog[]> {

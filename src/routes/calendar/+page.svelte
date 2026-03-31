@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getAllSessions, getSplitDays, getSplit } from '$lib/store';
+	import { getAllSessions, getSplitDays, getSplit, deleteWorkoutSession } from '$lib/store';
 	import { db } from '$lib/db';
 	import type { WorkoutSession, SplitDay, Split } from '$lib/types';
 
@@ -70,6 +70,15 @@
 	const selectedSessions = $derived(
 		selectedDate ? sessions.filter(s => s.date === selectedDate) : []
 	);
+
+	let deleteConfirmId = $state<string | null>(null);
+
+	async function handleDeleteSession(id: string) {
+		await deleteWorkoutSession(id);
+		sessions = sessions.filter(s => s.id !== id);
+		deleteConfirmId = null;
+		if (selectedSessions.length === 0) selectedDate = null;
+	}
 
 	function formatDuration(session: WorkoutSession): string {
 		if (!session.finishedAt) return 'In progress';
@@ -149,6 +158,35 @@
 							{#if session.notes}
 								<p class="text-text-secondary text-xs mt-1">{session.notes}</p>
 							{/if}
+							<div class="flex gap-2 mt-2">
+								<a
+									href="/workout/{session.id}/edit"
+									class="text-accent text-xs font-medium"
+								>
+									Edit
+								</a>
+								{#if deleteConfirmId === session.id}
+									<button
+										onclick={() => handleDeleteSession(session.id)}
+										class="text-danger text-xs font-medium"
+									>
+										Confirm Delete
+									</button>
+									<button
+										onclick={() => deleteConfirmId = null}
+										class="text-text-muted text-xs"
+									>
+										Cancel
+									</button>
+								{:else}
+									<button
+										onclick={() => deleteConfirmId = session.id}
+										class="text-danger text-xs font-medium"
+									>
+										Delete
+									</button>
+								{/if}
+							</div>
 						</div>
 					{/each}
 				</div>

@@ -12,9 +12,11 @@
 	let splits = $state<Split[]>([]);
 	let activeSplit = $state<Split | undefined>();
 	let todayDay = $state<SplitDay | undefined>();
+	let allDays = $state<SplitDay[]>([]);
 	let todaySlots = $state<Array<ExerciseSlot & { exercise?: Exercise; suggestedExerciseId?: string }>>([]);
 	let activeSession = $state<WorkoutSession | undefined>();
 	let loading = $state(true);
+	let showDayPicker = $state(false);
 
 	onMount(async () => {
 		await loadData();
@@ -33,22 +35,33 @@
 
 		if (splits.length > 0) {
 			activeSplit = splits[0]; // Use first split as active
+			allDays = await getSplitDays(activeSplit.id);
 			todayDay = await getTodaysSplitDay(activeSplit);
 
 			if (todayDay) {
-				const slots = await getExerciseSlots(todayDay.id);
-				todaySlots = await Promise.all(slots.map(async (slot) => {
-					const exercise = await getExercise(slot.exerciseId);
-					let suggestedExerciseId = slot.exerciseId;
-					const altIds = getAllExerciseIdsForSlot(slot).slice(1);
-					if (slot.type === 'alternating' && altIds.length > 0) {
-						suggestedExerciseId = await getAlternatingExerciseId(slot, todayDay!.id);
-					}
-					return { ...slot, exercise, suggestedExerciseId };
-				}));
+				await loadSlotsForDay(todayDay);
 			}
 		}
 		loading = false;
+	}
+
+	async function loadSlotsForDay(day: SplitDay) {
+		const slots = await getExerciseSlots(day.id);
+		todaySlots = await Promise.all(slots.map(async (slot) => {
+			const exercise = await getExercise(slot.exerciseId);
+			let suggestedExerciseId = slot.exerciseId;
+			const altIds = getAllExerciseIdsForSlot(slot).slice(1);
+			if (slot.type === 'alternating' && altIds.length > 0) {
+				suggestedExerciseId = await getAlternatingExerciseId(slot, day.id);
+			}
+			return { ...slot, exercise, suggestedExerciseId };
+		}));
+	}
+
+	async function switchDay(day: SplitDay) {
+		todayDay = day;
+		showDayPicker = false;
+		await loadSlotsForDay(day);
 	}
 
 	async function handleStartWorkout() {
@@ -97,13 +110,41 @@
 		<div class="bg-dark-card rounded-xl p-5 mb-4">
 			<div class="flex items-center justify-between mb-1">
 				<h2 class="text-lg font-semibold">{todayDay.name}</h2>
-				{#if activeSplit?.type === 'weekday' && todayDay.weekday}
-					<span class="text-text-muted text-sm">{WEEKDAY_LABELS[todayDay.weekday]}</span>
-				{:else}
-					<span class="text-text-muted text-sm">Up Next</span>
-				{/if}
+				<div class="flex items-center gap-2">
+					{#if activeSplit?.type === 'weekday' && todayDay.weekday}
+						<span class="text-text-muted text-sm">{WEEKDAY_LABELS[todayDay.weekday]}</span>
+					{:else}
+						<span class="text-text-muted text-sm">Up Next</span>
+					{/if}
+					<button
+						onclick={() => showDayPicker = !showDayPicker}
+						class="text-accent text-xs font-medium"
+					>
+						Change
+					</button>
+				</div>
 			</div>
 			<p class="text-text-secondary text-sm mb-4">{activeSplit?.name}</p>
+
+			{#if showDayPicker}
+				<div class="bg-dark-surface rounded-lg p-3 mb-4 border border-dark-border">
+					<p class="text-xs text-text-muted mb-2">Switch to a different day:</p>
+					<div class="space-y-1">
+						{#each allDays as day}
+							<button
+								onclick={() => switchDay(day)}
+								class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
+									{day.id === todayDay?.id ? 'bg-accent/20 text-accent font-medium' : 'hover:bg-dark-card text-text-secondary'}"
+							>
+								{day.name}
+								{#if day.weekday}
+									<span class="text-text-muted text-xs ml-1">({WEEKDAY_LABELS[day.weekday]})</span>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				</div>
+			{/if}
 
 			{#if todaySlots.length > 0}
 				<div class="space-y-2 mb-5">
