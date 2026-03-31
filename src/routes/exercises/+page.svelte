@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getExercises, createExercise, updateExercise, deleteExercise, getMuscleGroups, addMuscleGroup, getSettings } from '$lib/store';
-	import type { Exercise, MuscleGroup, Settings } from '$lib/types';
+	import { getExercises, createExercise, updateExercise, deleteExercise, getMuscleGroups, addMuscleGroup, getSettings, getIncrementProfiles } from '$lib/store';
+	import type { Exercise, MuscleGroup, Settings, IncrementProfile } from '$lib/types';
 
 	let exercises = $state<Exercise[]>([]);
 	let muscleGroups = $state<MuscleGroup[]>([]);
 	let settings = $state<Settings>(getSettings());
+	let profiles = $state<IncrementProfile[]>([]);
 	let loading = $state(true);
 	let filterGroup = $state('');
 	let searchQuery = $state('');
@@ -18,6 +19,7 @@
 	let newNotes = $state('');
 	let newRepTarget = $state<number | undefined>();
 	let newWeightIncrements = $state('');
+	let newProfileId = $state('');
 
 	// Edit state
 	let editingId = $state<string | null>(null);
@@ -27,6 +29,7 @@
 	let editNotes = $state('');
 	let editRepTarget = $state<number | undefined>();
 	let editWeightIncrements = $state('');
+	let editProfileId = $state('');
 
 	// New group
 	let showNewGroup = $state(false);
@@ -35,6 +38,7 @@
 	onMount(async () => {
 		settings = getSettings();
 		muscleGroups = await getMuscleGroups();
+		profiles = await getIncrementProfiles();
 		await loadExercises();
 	});
 
@@ -75,7 +79,8 @@
 			isBodyweight: newIsBodyweight,
 			notes: newNotes.trim() || undefined,
 			repTarget: newRepTarget,
-			weightIncrements: increments?.length ? increments : undefined
+			weightIncrements: increments?.length ? increments : undefined,
+			incrementProfileId: newProfileId || undefined
 		});
 
 		newName = '';
@@ -84,6 +89,7 @@
 		newNotes = '';
 		newRepTarget = undefined;
 		newWeightIncrements = '';
+		newProfileId = '';
 		showCreate = false;
 		await loadExercises();
 	}
@@ -96,6 +102,7 @@
 		editNotes = ex.notes ?? '';
 		editRepTarget = ex.repTarget;
 		editWeightIncrements = ex.weightIncrements?.join(', ') ?? '';
+		editProfileId = ex.incrementProfileId ?? '';
 	}
 
 	async function saveEdit() {
@@ -110,7 +117,8 @@
 			isBodyweight: editIsBodyweight,
 			notes: editNotes.trim() || undefined,
 			repTarget: editRepTarget,
-			weightIncrements: increments?.length ? increments : undefined
+			weightIncrements: increments?.length ? increments : undefined,
+			incrementProfileId: editProfileId || undefined
 		});
 
 		editingId = null;
@@ -225,6 +233,20 @@
 				</div>
 			</div>
 
+			<div>
+				<label class="text-xs text-text-muted">Weight profile</label>
+				<select
+					bind:value={newProfileId}
+					class="w-full bg-dark-surface text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
+				>
+					<option value="">None (use increments)</option>
+					{#each profiles as p}
+						<option value={p.id}>{p.name} ({p.weights[0]}–{p.weights[p.weights.length - 1]} kg)</option>
+					{/each}
+				</select>
+				<p class="text-xs text-text-muted mt-0.5">Profile overrides custom increments. Manage in Settings.</p>
+			</div>
+
 			<button
 				onclick={handleCreate}
 				disabled={!newName.trim() || !newGroupId}
@@ -270,6 +292,15 @@
 									<input type="text" bind:value={editWeightIncrements} placeholder="Increments"
 										class="flex-1 bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 								</div>
+								<select
+									bind:value={editProfileId}
+									class="w-full bg-dark-surface text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
+								>
+									<option value="">No weight profile</option>
+									{#each profiles as p}
+										<option value={p.id}>{p.name} ({p.weights[0]}–{p.weights[p.weights.length - 1]} kg)</option>
+									{/each}
+								</select>
 								<div class="flex gap-2">
 									<button onclick={saveEdit} class="flex-1 bg-success text-white py-1.5 rounded text-sm">Save</button>
 									<button onclick={() => editingId = null} class="flex-1 bg-dark-surface text-text-secondary py-1.5 rounded text-sm">Cancel</button>
@@ -281,6 +312,12 @@
 									<span class="text-sm font-medium">{ex.name}</span>
 									{#if ex.isBodyweight}
 										<span class="text-xs text-text-muted ml-1">BW</span>
+									{/if}
+									{#if ex.incrementProfileId}
+										{@const prof = profiles.find(p => p.id === ex.incrementProfileId)}
+										{#if prof}
+											<span class="text-xs text-accent ml-1">· {prof.name}</span>
+										{/if}
 									{/if}
 									{#if ex.notes}
 										<p class="text-xs text-text-muted mt-0.5">{ex.notes}</p>

@@ -6,10 +6,10 @@
 		getExerciseSlots, getExerciseLogs, getExercise, getSetLogs,
 		finishWorkoutSession, createExerciseLog, getAlternatingExerciseId,
 		getLastPerformance, calculateProgression, createSetLog, getSettings,
-		getAllExerciseIdsForSlot
+		getAllExerciseIdsForSlot, getIncrementProfile
 	} from '$lib/store';
 	import { db } from '$lib/db';
-	import type { WorkoutSession, SplitDay, ExerciseSlot, ExerciseLog, SetLog, Exercise, Settings } from '$lib/types';
+	import type { WorkoutSession, SplitDay, ExerciseSlot, ExerciseLog, SetLog, Exercise, Settings, IncrementProfile } from '$lib/types';
 
 	let session = $state<WorkoutSession | undefined>();
 	let splitDay = $state<SplitDay | undefined>();
@@ -101,6 +101,12 @@
 		const repTarget = exercise?.repTarget ?? settings.defaultRepTarget;
 		const increment = settings.defaultWeightIncrement;
 
+		// Load increment profile if exercise references one
+		let profile: IncrementProfile | undefined;
+		if (exercise?.incrementProfileId) {
+			profile = await getIncrementProfile(exercise.incrementProfileId);
+		}
+
 		for (let i = 0; i < slot.targetSets; i++) {
 			let targetWeight = 0;
 			let targetReps = slotTargetReps;
@@ -110,7 +116,8 @@
 					last.sets.filter(s => s.completed),
 					repTarget,
 					increment,
-					exercise?.weightIncrements
+					exercise?.weightIncrements,
+					profile
 				);
 				targetWeight = prog.suggestedWeight;
 				targetReps = prog.suggestedReps;

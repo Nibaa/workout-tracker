@@ -2,9 +2,9 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getSetLogs, updateSetLog, finishExerciseLog, getExercise, getSettings } from '$lib/store';
+	import { getSetLogs, updateSetLog, finishExerciseLog, getExercise, getSettings, getIncrementProfile, getNextWeightInProfile, getPrevWeightInProfile } from '$lib/store';
 	import { db } from '$lib/db';
-	import type { ExerciseLog, SetLog, Exercise, Settings } from '$lib/types';
+	import type { ExerciseLog, SetLog, Exercise, Settings, IncrementProfile } from '$lib/types';
 
 	let exerciseLog = $state<ExerciseLog | undefined>();
 	let exercise = $state<Exercise | undefined>();
@@ -12,6 +12,7 @@
 	let currentSetIndex = $state(0);
 	let loading = $state(true);
 	let settings = $state<Settings>(getSettings());
+	let profile = $state<IncrementProfile | undefined>();
 
 	// Rest timer
 	let restActive = $state(false);
@@ -48,6 +49,9 @@
 		if (!exerciseLog) { goto(`/workout/${sessionId}`); return; }
 
 		exercise = await getExercise(exerciseLog.exerciseId);
+		if (exercise?.incrementProfileId) {
+			profile = await getIncrementProfile(exercise.incrementProfileId);
+		}
 		sets = await getSetLogs(logId);
 
 		// Find first incomplete set
@@ -197,7 +201,14 @@
 						<label class="block text-xs text-text-secondary mb-2">Weight (kg)</label>
 						<div class="flex items-center gap-3">
 							<button
-								onclick={() => inputWeight = Math.max(0, inputWeight - (exercise!.weightIncrements?.[0] ?? settings.defaultWeightIncrement))}
+								onclick={() => {
+									if (profile) {
+										const prev = getPrevWeightInProfile(inputWeight, profile);
+										inputWeight = prev ?? 0;
+									} else {
+										inputWeight = Math.max(0, inputWeight - (exercise!.weightIncrements?.[0] ?? settings.defaultWeightIncrement));
+									}
+								}}
 								class="w-12 h-12 bg-dark-surface rounded-lg text-xl font-bold text-text-secondary hover:text-text-primary transition-colors"
 							>−</button>
 							<input
@@ -208,7 +219,14 @@
 								class="flex-1 bg-dark-surface text-center text-2xl font-bold py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
 							/>
 							<button
-								onclick={() => inputWeight += (exercise!.weightIncrements?.[0] ?? settings.defaultWeightIncrement)}
+								onclick={() => {
+									if (profile) {
+										const next = getNextWeightInProfile(inputWeight, profile);
+										if (next !== undefined) inputWeight = next;
+									} else {
+										inputWeight += (exercise!.weightIncrements?.[0] ?? settings.defaultWeightIncrement);
+									}
+								}}
 								class="w-12 h-12 bg-dark-surface rounded-lg text-xl font-bold text-text-secondary hover:text-text-primary transition-colors"
 							>+</button>
 						</div>

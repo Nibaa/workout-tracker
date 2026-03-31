@@ -1,7 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type {
 	Split, SplitDay, Exercise, ExerciseSlot,
-	WorkoutSession, ExerciseLog, SetLog, MuscleGroup
+	WorkoutSession, ExerciseLog, SetLog, MuscleGroup, IncrementProfile
 } from '$lib/types';
 
 const db = new Dexie('WorkoutTracker') as Dexie & {
@@ -13,6 +13,7 @@ const db = new Dexie('WorkoutTracker') as Dexie & {
 	workoutSessions: EntityTable<WorkoutSession, 'id'>;
 	exerciseLogs: EntityTable<ExerciseLog, 'id'>;
 	setLogs: EntityTable<SetLog, 'id'>;
+	incrementProfiles: EntityTable<IncrementProfile, 'id'>;
 };
 
 db.version(1).stores({
@@ -43,6 +44,19 @@ db.version(2).stores({
 			slot.alternateExerciseIds = [slot.alternateExerciseId];
 		}
 	});
+});
+
+// Migration: add incrementProfiles table
+db.version(3).stores({
+	splits: 'id, type, createdAt',
+	splitDays: 'id, splitId, weekday, order',
+	muscleGroups: 'id, name',
+	exercises: 'id, name, muscleGroupId, createdAt',
+	exerciseSlots: 'id, splitDayId, order, exerciseId',
+	workoutSessions: 'id, splitDayId, splitId, date, status',
+	exerciseLogs: 'id, sessionId, exerciseId, slotId',
+	setLogs: 'id, exerciseLogId, setNumber',
+	incrementProfiles: 'id, name'
 });
 
 export { db };

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getSettings, saveSettings, exportAllData, importAllData } from '$lib/store';
-	import type { Settings } from '$lib/types';
+	import { getSettings, saveSettings, exportAllData, importAllData, getIncrementProfiles, createIncrementProfile, updateIncrementProfile, deleteIncrementProfile } from '$lib/store';
+	import type { Settings, IncrementProfile } from '$lib/types';
 
 	let settings = $state<Settings>(getSettings());
 	let exportData = $state('');
@@ -9,8 +9,18 @@
 	let importStatus = $state<'idle' | 'success' | 'error'>('idle');
 	let importMsg = $state('');
 
-	onMount(() => {
+	// Increment profiles
+	let profiles = $state<IncrementProfile[]>([]);
+	let showCreateProfile = $state(false);
+	let newProfileName = $state('');
+	let newProfileWeights = $state('');
+	let editingProfileId = $state<string | null>(null);
+	let editProfileName = $state('');
+	let editProfileWeights = $state('');
+
+	onMount(async () => {
 		settings = getSettings();
+		profiles = await getIncrementProfiles();
 	});
 
 	function save() {
@@ -50,6 +60,40 @@
 			importText = reader.result as string;
 		};
 		reader.readAsText(file);
+	}
+
+	function parseWeights(str: string): number[] {
+		return str.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n) && n > 0).sort((a, b) => a - b);
+	}
+
+	async function handleCreateProfile() {
+		const weights = parseWeights(newProfileWeights);
+		if (!newProfileName.trim() || weights.length === 0) return;
+		await createIncrementProfile(newProfileName.trim(), weights);
+		profiles = await getIncrementProfiles();
+		newProfileName = '';
+		newProfileWeights = '';
+		showCreateProfile = false;
+	}
+
+	function startEditProfile(p: IncrementProfile) {
+		editingProfileId = p.id;
+		editProfileName = p.name;
+		editProfileWeights = p.weights.join(', ');
+	}
+
+	async function saveEditProfile() {
+		if (!editingProfileId) return;
+		const weights = parseWeights(editProfileWeights);
+		if (!editProfileName.trim() || weights.length === 0) return;
+		await updateIncrementProfile(editingProfileId, { name: editProfileName.trim(), weights });
+		profiles = await getIncrementProfiles();
+		editingProfileId = null;
+	}
+
+	async function handleDeleteProfile(id: string) {
+		await deleteIncrementProfile(id);
+		profiles = await getIncrementProfiles();
 	}
 </script>
 
@@ -97,6 +141,83 @@
 				/>
 			</div>
 		</div>
+	</div>
+
+	<!-- Increment Profiles -->
+	<div class="bg-dark-card rounded-xl p-4 mb-4">
+		<div class="flex items-center justify-between mb-3">
+			<h2 class="font-semibold">Weight Profiles</h2>
+			<button
+				onclick={() => showCreateProfile = !showCreateProfile}
+				class="text-accent text-sm font-medium"
+			>
+				{showCreateProfile ? 'Cancel' : '+ New'}
+			</button>
+		</div>
+		<p class="text-xs text-text-muted mb-3">Define available weights for your equipment (e.g., dumbbell sets). Assign a profile to exercises so +/- buttons snap to your actual weights.</p>
+
+		{#if showCreateProfile}
+			<div class="bg-dark-surface rounded-lg p-3 mb-3 space-y-2 border border-accent">
+				<input
+					type="text"
+					bind:value={newProfileName}
+					placeholder="Profile name (e.g. My Dumbbells)"
+					class="w-full bg-dark-bg px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none text-sm"
+				/>
+				<input
+					type="text"
+					bind:value={newProfileWeights}
+					placeholder="Available weights: 5, 7.5, 10, 12.5, 15, 20, 25, 30"
+					class="w-full bg-dark-bg px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none text-sm"
+				/>
+				<p class="text-xs text-text-muted">Comma-separated list of available weights in kg</p>
+				<button
+					onclick={handleCreateProfile}
+					disabled={!newProfileName.trim() || !newProfileWeights.trim()}
+					class="w-full bg-success hover:bg-green-600 disabled:bg-dark-surface disabled:text-text-muted text-white py-2 rounded-lg text-sm font-medium transition-colors"
+				>
+					Create Profile
+				</button>
+			</div>
+		{/if}
+
+		{#if profiles.length === 0}
+			<p class="text-text-secondary text-sm text-center py-4">No profiles yet. Create one to get started.</p>
+		{:else}
+			<div class="space-y-2">
+				{#each profiles as p}
+					{#if editingProfileId === p.id}
+						<div class="bg-dark-surface rounded-lg p-3 space-y-2 border border-accent">
+							<input
+								type="text"
+								bind:value={editProfileName}
+								class="w-full bg-dark-bg px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none text-sm"
+							/>
+							<input
+								type="text"
+								bind:value={editProfileWeights}
+								class="w-full bg-dark-bg px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none text-sm"
+							/>
+							<div class="flex gap-2">
+								<button onclick={saveEditProfile} class="flex-1 bg-success text-white py-1.5 rounded-lg text-sm">Save</button>
+								<button onclick={() => editingProfileId = null} class="flex-1 bg-dark-bg text-text-secondary py-1.5 rounded-lg text-sm">Cancel</button>
+							</div>
+						</div>
+					{:else}
+						<div class="bg-dark-surface rounded-lg p-3">
+							<div class="flex items-center justify-between mb-1">
+								<span class="font-medium text-sm">{p.name}</span>
+								<div class="flex gap-2">
+									<button onclick={() => startEditProfile(p)} class="text-accent text-xs">Edit</button>
+									<button onclick={() => handleDeleteProfile(p.id)} class="text-danger text-xs">Delete</button>
+								</div>
+							</div>
+							<p class="text-xs text-text-muted">{p.weights.join(', ')} kg</p>
+						</div>
+					{/if}
+				{/each}
+			</div>
+		{/if}
 	</div>
 
 	<!-- Data Management -->

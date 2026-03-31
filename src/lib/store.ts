@@ -3,7 +3,8 @@ import { db } from '$lib/db';
 import {
 	DEFAULT_SETTINGS, DEFAULT_MUSCLE_GROUPS,
 	type Split, type SplitDay, type Exercise, type ExerciseSlot,
-	type WorkoutSession, type ExerciseLog, type SetLog, type Settings, type MuscleGroup, type Weekday
+	type WorkoutSession, type ExerciseLog, type SetLog, type Settings, type MuscleGroup, type Weekday,
+	type IncrementProfile
 } from '$lib/types';
 
 // ─── Settings ───
@@ -38,6 +39,58 @@ export async function addMuscleGroup(name: string): Promise<MuscleGroup> {
 	const group: MuscleGroup = { id: uuidv4(), name };
 	await db.muscleGroups.add(group);
 	return group;
+}
+
+// ─── Increment Profiles ───
+
+export async function getIncrementProfiles(): Promise<IncrementProfile[]> {
+	return db.incrementProfiles.orderBy('name').toArray();
+}
+
+export async function getIncrementProfile(id: string): Promise<IncrementProfile | undefined> {
+	return db.incrementProfiles.get(id);
+}
+
+export async function createIncrementProfile(name: string, weights: number[]): Promise<IncrementProfile> {
+	const sorted = [...weights].sort((a, b) => a - b);
+	const profile: IncrementProfile = { id: uuidv4(), name, weights: sorted };
+	await db.incrementProfiles.add(profile);
+	return profile;
+}
+
+export async function updateIncrementProfile(id: string, updates: Partial<Omit<IncrementProfile, 'id'>>): Promise<void> {
+	if (updates.weights) {
+		updates.weights = [...updates.weights].sort((a, b) => a - b);
+	}
+	await db.incrementProfiles.update(id, updates);
+}
+
+export async function deleteIncrementProfile(id: string): Promise<void> {
+	// Clear reference from any exercises using this profile
+	const exercises = await db.exercises.filter(e => e.incrementProfileId === id).toArray();
+	for (const ex of exercises) {
+		await db.exercises.update(ex.id, { incrementProfileId: undefined });
+	}
+	await db.incrementProfiles.delete(id);
+}
+
+/**
+ * Given a current weight and an increment profile, find the next weight up.
+ * Returns undefined if already at max or no profile.
+ */
+export function getNextWeightInProfile(currentWeight: number, profile: IncrementProfile): number | undefined {
+	const next = profile.weights.find(w => w > currentWeight);
+	return next;
+}
+
+/**
+ * Given a current weight and an increment profile, find the next weight down.
+ * Returns undefined if already at min or no profile.
+ */
+export function getPrevWeightInProfile(currentWeight: number, profile: IncrementProfile): number | undefined {
+	// Find the largest weight that is less than currentWeight
+	const candidates = profile.weights.filter(w => w < currentWeight);
+	return candidates.length > 0 ? candidates[candidates.length - 1] : undefined;
 }
 
 // ─── Splits ───
@@ -253,12 +306,16 @@ export async function getLastPerformance(exerciseId: string, splitDayId: string)
  * Calculate suggested weight and reps for the next workout.
  * - If all sets hit the rep target → increase weight, reset reps
  * - Otherwise → increase target reps by 1
+ *
+ * If an incrementProfile is provided, weight jumps to the next available
+ * weight in the profile instead of adding a fixed increment.
  */
 export function calculateProgression(
 	lastSets: SetLog[],
 	repTarget: number,
 	weightIncrement: number,
-	customIncrements?: number[]
+	customIncrements?: number[],
+	incrementProfile?: IncrementProfile
 ): { suggestedWeight: number; suggestedReps: number } {
 	if (lastSets.length === 0) {
 		return { suggestedWeight: 0, suggestedReps: repTarget - 4 };
@@ -268,15 +325,21 @@ export function calculateProgression(
 	const allSetsHitTarget = lastSets.every(s => (s.actualReps ?? 0) >= repTarget);
 
 	if (allSetsHitTarget) {
-		// Weight increase
-		let increment = weightIncrement;
-		if (customIncrements && customIncrements.length > 0) {
-			// Find the smallest increment that's available above current weight
+		let newWeight: number;
+
+		if (incrementProfile) {
+			// Jump to next available weight in profile
+			const next = getNextWeightInProfile(lastWeight, incrementProfile);
+			newWeight = next ?? lastWeight; // Stay at max if no higher weight available
+		} else if (customIncrements && customIncrements.length > 0) {
 			const sorted = [...customIncrements].sort((a, b) => a - b);
-			increment = sorted[0]; // Use smallest available increment
+			newWeight = lastWeight + sorted[0];
+		} else {
+			newWeight = lastWeight + weightIncrement;
 		}
+
 		return {
-			suggestedWeight: lastWeight + increment,
+			suggestedWeight: newWeight,
 			suggestedReps: lastSets[0].targetReps // Reset to original target reps (lower end)
 		};
 	}
@@ -426,7 +489,7 @@ export async function getExerciseHistory(exerciseId: string): Promise<Array<{
 
 export async function exportAllData(): Promise<string> {
 	const data = {
-		version: 1,
+		version: 2,
 		exportedAt: new Date().toISOString(),
 		settings: getSettings(),
 		splits: await db.splits.toArray(),
@@ -436,18 +499,19 @@ export async function exportAllData(): Promise<string> {
 		exerciseSlots: await db.exerciseSlots.toArray(),
 		workoutSessions: await db.workoutSessions.toArray(),
 		exerciseLogs: await db.exerciseLogs.toArray(),
-		setLogs: await db.setLogs.toArray()
+		setLogs: await db.setLogs.toArray(),
+		incrementProfiles: await db.incrementProfiles.toArray()
 	};
 	return JSON.stringify(data, null, 2);
 }
 
 export async function importAllData(json: string): Promise<void> {
 	const data = JSON.parse(json);
-	if (data.version !== 1) throw new Error('Unsupported export version');
+	if (data.version !== 1 && data.version !== 2) throw new Error('Unsupported export version');
 
 	await db.transaction('rw',
 		[db.splits, db.splitDays, db.muscleGroups, db.exercises,
-		 db.exerciseSlots, db.workoutSessions, db.exerciseLogs, db.setLogs],
+		 db.exerciseSlots, db.workoutSessions, db.exerciseLogs, db.setLogs, db.incrementProfiles],
 		async () => {
 			await db.splits.clear();
 			await db.splitDays.clear();
@@ -457,6 +521,7 @@ export async function importAllData(json: string): Promise<void> {
 			await db.workoutSessions.clear();
 			await db.exerciseLogs.clear();
 			await db.setLogs.clear();
+			await db.incrementProfiles.clear();
 
 			if (data.splits) await db.splits.bulkAdd(data.splits);
 			if (data.splitDays) await db.splitDays.bulkAdd(data.splitDays);
@@ -466,6 +531,7 @@ export async function importAllData(json: string): Promise<void> {
 			if (data.workoutSessions) await db.workoutSessions.bulkAdd(data.workoutSessions);
 			if (data.exerciseLogs) await db.exerciseLogs.bulkAdd(data.exerciseLogs);
 			if (data.setLogs) await db.setLogs.bulkAdd(data.setLogs);
+			if (data.incrementProfiles) await db.incrementProfiles.bulkAdd(data.incrementProfiles);
 		}
 	);
 

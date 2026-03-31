@@ -22,6 +22,13 @@ export interface MuscleGroup {
 	name: string;
 }
 
+export interface IncrementProfile {
+	id: string;
+	name: string;
+	/** Sorted list of available weights in kg (e.g., [5, 7.5, 10, 12.5, 15, 20, 25, 30]) */
+	weights: number[];
+}
+
 export interface Exercise {
 	id: string;
 	name: string;
@@ -30,6 +37,8 @@ export interface Exercise {
 	notes?: string;
 	/** Custom weight increments for adjustable equipment (e.g., [1, 1.5, 2, 2.5]) */
 	weightIncrements?: number[];
+	/** Reference to an increment profile for available weights */
+	incrementProfileId?: string;
 	/** Per-exercise rep target override. When all sets hit this, suggest weight increase */
 	repTarget?: number;
 	createdAt: string;
