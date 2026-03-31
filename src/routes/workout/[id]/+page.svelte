@@ -97,8 +97,10 @@
 		// Create target sets based on progression
 		const last = await getLastPerformance(eid, session.splitDayId);
 		const exercise = await getExercise(eid);
-		const slotTargetReps = slot.targetReps ?? settings.defaultRepTarget;
-		const repTarget = exercise?.repTarget ?? settings.defaultRepTarget;
+		// Rep target resolution: slot → exercise → split day → global
+		const splitDayRepTarget = splitDay?.defaultRepTarget;
+		const slotTargetReps = slot.targetReps ?? exercise?.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
+		const repTarget = exercise?.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
 		const increment = settings.defaultWeightIncrement;
 
 		// Load increment profile if exercise references one

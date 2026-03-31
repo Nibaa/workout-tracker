@@ -59,4 +59,17 @@ db.version(3).stores({
 	incrementProfiles: 'id, name'
 });
 
+// Migration: add secondaryMuscleGroupIds to exercises, defaultRepTarget to splitDays
+db.version(4).stores({
+	splits: 'id, type, createdAt',
+	splitDays: 'id, splitId, weekday, order',
+	muscleGroups: 'id, name',
+	exercises: 'id, name, muscleGroupId, createdAt',
+	exerciseSlots: 'id, splitDayId, order, exerciseId',
+	workoutSessions: 'id, splitDayId, splitId, date, status',
+	exerciseLogs: 'id, sessionId, exerciseId, slotId',
+	setLogs: 'id, exerciseLogId, setNumber',
+	incrementProfiles: 'id, name'
+});
+
 export { db };

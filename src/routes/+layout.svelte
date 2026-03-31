@@ -2,12 +2,13 @@
 	import '../app.css';
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
-	import { initMuscleGroups } from '$lib/store';
+	import { initMuscleGroups, initPresetExercises } from '$lib/store';
 
 	let { children } = $props();
 
-	onMount(() => {
-		initMuscleGroups();
+	onMount(async () => {
+		await initMuscleGroups();
+		await initPresetExercises();
 
 		// Register service worker for PWA
 		if ('serviceWorker' in navigator) {

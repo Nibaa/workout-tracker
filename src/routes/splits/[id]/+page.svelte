@@ -24,6 +24,7 @@
 	let showAddDay = $state(false);
 	let newDayName = $state('');
 	let newDayWeekday = $state<Weekday>('monday');
+	let newDayRepTarget = $state<number | undefined>();
 
 	// New slot form
 	let addingSlotForDay = $state<string | null>(null);
@@ -80,8 +81,9 @@
 	async function handleAddDay() {
 		if (!newDayName.trim()) return;
 		const order = days.length;
-		await createSplitDay(splitId, newDayName.trim(), order, split?.type === 'weekday' ? newDayWeekday : undefined);
+		await createSplitDay(splitId, newDayName.trim(), order, split?.type === 'weekday' ? newDayWeekday : undefined, newDayRepTarget);
 		newDayName = '';
+		newDayRepTarget = undefined;
 		showAddDay = false;
 		await loadData();
 	}
@@ -162,8 +164,21 @@
 						{:else}
 							<span class="text-text-muted text-xs">Day {day.order + 1}</span>
 						{/if}
+						{#if day.defaultRepTarget}
+							<span class="text-text-muted text-xs ml-1">· {day.defaultRepTarget} rep target</span>
+						{/if}
 					</div>
-					<button onclick={() => handleDeleteDay(day.id)} class="text-danger text-xs">Delete</button>
+					<div class="flex gap-2 items-center">
+						<button onclick={async () => {
+							const val = prompt('Default rep target for this day (empty = use global):', String(day.defaultRepTarget ?? ''));
+							if (val !== null) {
+								const num = val.trim() ? parseInt(val) : undefined;
+								await updateSplitDay(day.id, { defaultRepTarget: num });
+								await loadData();
+							}
+						}} class="text-accent text-xs">Rep target</button>
+						<button onclick={() => handleDeleteDay(day.id)} class="text-danger text-xs">Delete</button>
+					</div>
 				</div>
 
 				<!-- Slots -->
@@ -321,6 +336,11 @@
 						{/each}
 					</select>
 				{/if}
+				<div class="mb-3">
+					<label class="text-xs text-text-muted">Default rep target (optional, overrides global)</label>
+					<input type="number" bind:value={newDayRepTarget} min="1" max="100" placeholder="Use global default"
+						class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border" />
+				</div>
 				<div class="flex gap-2">
 					<button
 						onclick={handleAddDay}

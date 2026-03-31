@@ -15,6 +15,8 @@ export interface SplitDay {
 	name: string;
 	weekday?: Weekday;
 	order: number;
+	/** Default rep target for exercises in this split day (overrides global, overridden by exercise-level) */
+	defaultRepTarget?: number;
 }
 
 export interface MuscleGroup {
@@ -33,6 +35,8 @@ export interface Exercise {
 	id: string;
 	name: string;
 	muscleGroupId: string;
+	/** Up to 2 secondary muscle group IDs */
+	secondaryMuscleGroupIds?: string[];
 	isBodyweight: boolean;
 	notes?: string;
 	/** Custom weight increments for adjustable equipment (e.g., [1, 1.5, 2, 2.5]) */
@@ -41,6 +45,8 @@ export interface Exercise {
 	incrementProfileId?: string;
 	/** Per-exercise rep target override. When all sets hit this, suggest weight increase */
 	repTarget?: number;
+	/** Whether this is a preset exercise (not deletable, but editable) */
+	isPreset?: boolean;
 	createdAt: string;
 }
 
@@ -126,4 +132,91 @@ export const WEEKDAY_LABELS: Record<Weekday, string> = {
 export const DEFAULT_MUSCLE_GROUPS = [
 	'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Forearms',
 	'Quadriceps', 'Hamstrings', 'Glutes', 'Calves', 'Core', 'Full Body'
+];
+
+/**
+ * Preset exercises with muscle group mappings.
+ * mainGroup must match a DEFAULT_MUSCLE_GROUPS entry.
+ * secondaryGroups are optional (up to 2).
+ */
+export interface PresetExerciseDef {
+	name: string;
+	mainGroup: string;
+	secondaryGroups?: string[];
+	isBodyweight?: boolean;
+	notes?: string;
+}
+
+export const PRESET_EXERCISES: PresetExerciseDef[] = [
+	// Chest
+	{ name: 'Incline Press', mainGroup: 'Chest', secondaryGroups: ['Shoulders', 'Triceps'] },
+	{ name: 'Flat Bench Press', mainGroup: 'Chest', secondaryGroups: ['Shoulders', 'Triceps'] },
+	{ name: 'Decline Press', mainGroup: 'Chest', secondaryGroups: ['Triceps'] },
+	{ name: 'Push-Up', mainGroup: 'Chest', secondaryGroups: ['Shoulders', 'Triceps'], isBodyweight: true },
+	{ name: 'Dumbbell Fly', mainGroup: 'Chest', secondaryGroups: ['Shoulders'] },
+	{ name: 'Incline Fly', mainGroup: 'Chest', secondaryGroups: ['Shoulders'] },
+	{ name: 'Cable Crossover', mainGroup: 'Chest', secondaryGroups: ['Shoulders'] },
+	{ name: 'Chest Dip', mainGroup: 'Chest', secondaryGroups: ['Triceps', 'Shoulders'], isBodyweight: true },
+
+	// Back
+	{ name: 'Bent-Over Row', mainGroup: 'Back', secondaryGroups: ['Biceps', 'Core'] },
+	{ name: 'One-Handed Row', mainGroup: 'Back', secondaryGroups: ['Biceps', 'Core'] },
+	{ name: 'Pull-Up', mainGroup: 'Back', secondaryGroups: ['Biceps', 'Forearms'], isBodyweight: true },
+	{ name: 'Chin-Up', mainGroup: 'Back', secondaryGroups: ['Biceps'], isBodyweight: true },
+	{ name: 'Lat Pulldown', mainGroup: 'Back', secondaryGroups: ['Biceps'] },
+	{ name: 'Seated Cable Row', mainGroup: 'Back', secondaryGroups: ['Biceps'] },
+	{ name: 'T-Bar Row', mainGroup: 'Back', secondaryGroups: ['Biceps', 'Core'] },
+	{ name: '1-Arm Reverse Fly', mainGroup: 'Back', secondaryGroups: ['Shoulders'] },
+	{ name: 'Face Pull', mainGroup: 'Back', secondaryGroups: ['Shoulders'] },
+
+	// Shoulders
+	{ name: 'Seated Overhead Press', mainGroup: 'Shoulders', secondaryGroups: ['Triceps'] },
+	{ name: 'Standing Overhead Press', mainGroup: 'Shoulders', secondaryGroups: ['Triceps', 'Core'] },
+	{ name: 'Seated Y Lateral Raise', mainGroup: 'Shoulders' },
+	{ name: 'Lateral Raise', mainGroup: 'Shoulders' },
+	{ name: 'Front Raise', mainGroup: 'Shoulders', secondaryGroups: ['Chest'] },
+	{ name: 'Arnold Press', mainGroup: 'Shoulders', secondaryGroups: ['Triceps'] },
+	{ name: 'Upright Row', mainGroup: 'Shoulders', secondaryGroups: ['Biceps'] },
+	{ name: 'Rear Delt Fly', mainGroup: 'Shoulders', secondaryGroups: ['Back'] },
+	{ name: 'Shrugs', mainGroup: 'Shoulders' },
+
+	// Biceps
+	{ name: 'Incline Curl', mainGroup: 'Biceps', secondaryGroups: ['Forearms'] },
+	{ name: 'Preacher Curl', mainGroup: 'Biceps', secondaryGroups: ['Forearms'] },
+	{ name: 'Barbell Curl', mainGroup: 'Biceps', secondaryGroups: ['Forearms'] },
+	{ name: 'Hammer Curl', mainGroup: 'Biceps', secondaryGroups: ['Forearms'] },
+	{ name: 'Concentration Curl', mainGroup: 'Biceps' },
+	{ name: 'Cable Curl', mainGroup: 'Biceps' },
+
+	// Triceps
+	{ name: 'Incline Tricep Extension', mainGroup: 'Triceps' },
+	{ name: 'Overhead Tricep Extension', mainGroup: 'Triceps' },
+	{ name: 'Skull Crusher', mainGroup: 'Triceps' },
+	{ name: 'Tricep Pushdown', mainGroup: 'Triceps' },
+	{ name: 'Close-Grip Bench Press', mainGroup: 'Triceps', secondaryGroups: ['Chest'] },
+	{ name: 'Dips', mainGroup: 'Triceps', secondaryGroups: ['Chest', 'Shoulders'], isBodyweight: true },
+	{ name: 'Kickback', mainGroup: 'Triceps' },
+
+	// Legs
+	{ name: 'Barbell Squat', mainGroup: 'Quadriceps', secondaryGroups: ['Glutes', 'Core'] },
+	{ name: 'Bulgarian Squat', mainGroup: 'Quadriceps', secondaryGroups: ['Glutes'] },
+	{ name: 'Leg Press', mainGroup: 'Quadriceps', secondaryGroups: ['Glutes'] },
+	{ name: 'Leg Extension', mainGroup: 'Quadriceps' },
+	{ name: 'Lunge', mainGroup: 'Quadriceps', secondaryGroups: ['Glutes'] },
+	{ name: 'Goblet Squat', mainGroup: 'Quadriceps', secondaryGroups: ['Glutes', 'Core'] },
+	{ name: 'Dumbbell Deadlift', mainGroup: 'Hamstrings', secondaryGroups: ['Glutes', 'Back'] },
+	{ name: 'Romanian Deadlift', mainGroup: 'Hamstrings', secondaryGroups: ['Glutes', 'Back'] },
+	{ name: 'Leg Curl', mainGroup: 'Hamstrings' },
+	{ name: 'Hip Thrust', mainGroup: 'Glutes', secondaryGroups: ['Hamstrings'] },
+	{ name: 'Glute Bridge', mainGroup: 'Glutes', secondaryGroups: ['Hamstrings'], isBodyweight: true },
+	{ name: 'Calf Raise', mainGroup: 'Calves' },
+	{ name: 'Seated Calf Raise', mainGroup: 'Calves' },
+
+	// Core
+	{ name: 'Plank', mainGroup: 'Core', isBodyweight: true },
+	{ name: 'Crunch', mainGroup: 'Core', isBodyweight: true },
+	{ name: 'Hanging Leg Raise', mainGroup: 'Core', isBodyweight: true },
+	{ name: 'Russian Twist', mainGroup: 'Core' },
+	{ name: 'Ab Wheel Rollout', mainGroup: 'Core', isBodyweight: true },
+	{ name: 'Cable Woodchop', mainGroup: 'Core', secondaryGroups: ['Shoulders'] },
 ];

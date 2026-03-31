@@ -15,6 +15,7 @@
 	let showCreate = $state(false);
 	let newName = $state('');
 	let newGroupId = $state('');
+	let newSecondaryGroupIds = $state<string[]>([]);
 	let newIsBodyweight = $state(false);
 	let newNotes = $state('');
 	let newRepTarget = $state<number | undefined>();
@@ -25,6 +26,7 @@
 	let editingId = $state<string | null>(null);
 	let editName = $state('');
 	let editGroupId = $state('');
+	let editSecondaryGroupIds = $state<string[]>([]);
 	let editIsBodyweight = $state(false);
 	let editNotes = $state('');
 	let editRepTarget = $state<number | undefined>();
@@ -76,6 +78,7 @@
 		await createExercise({
 			name: newName.trim(),
 			muscleGroupId: newGroupId,
+			secondaryMuscleGroupIds: newSecondaryGroupIds.filter(id => id && id !== newGroupId).slice(0, 2) || undefined,
 			isBodyweight: newIsBodyweight,
 			notes: newNotes.trim() || undefined,
 			repTarget: newRepTarget,
@@ -85,6 +88,7 @@
 
 		newName = '';
 		newGroupId = '';
+		newSecondaryGroupIds = [];
 		newIsBodyweight = false;
 		newNotes = '';
 		newRepTarget = undefined;
@@ -98,6 +102,7 @@
 		editingId = ex.id;
 		editName = ex.name;
 		editGroupId = ex.muscleGroupId;
+		editSecondaryGroupIds = ex.secondaryMuscleGroupIds ? [...ex.secondaryMuscleGroupIds] : [];
 		editIsBodyweight = ex.isBodyweight;
 		editNotes = ex.notes ?? '';
 		editRepTarget = ex.repTarget;
@@ -114,6 +119,7 @@
 		await updateExercise(editingId, {
 			name: editName.trim(),
 			muscleGroupId: editGroupId,
+			secondaryMuscleGroupIds: editSecondaryGroupIds.filter(id => id && id !== editGroupId).slice(0, 2) || undefined,
 			isBodyweight: editIsBodyweight,
 			notes: editNotes.trim() || undefined,
 			repTarget: editRepTarget,
@@ -140,6 +146,11 @@
 
 	function getGroupName(id: string): string {
 		return muscleGroups.find(g => g.id === id)?.name ?? 'Unknown';
+	}
+
+	function getSecondaryGroupNames(ids?: string[]): string {
+		if (!ids || ids.length === 0) return '';
+		return ids.map(id => getGroupName(id)).join(', ');
 	}
 </script>
 
@@ -213,6 +224,32 @@
 				Bodyweight exercise
 			</label>
 
+			<!-- Secondary Muscle Groups -->
+			<div>
+				<label class="text-xs text-text-muted">Secondary muscle groups (up to 2)</label>
+				<div class="space-y-2 mt-1">
+					{#each [0, 1] as i}
+						<select
+							value={newSecondaryGroupIds[i] ?? ''}
+							onchange={(e) => {
+								const val = (e.target as HTMLSelectElement).value;
+								const updated = [...newSecondaryGroupIds];
+								if (val) { updated[i] = val; } else { updated.splice(i, 1); }
+								newSecondaryGroupIds = updated.filter(Boolean);
+							}}
+							class="w-full bg-dark-surface text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
+						>
+							<option value="">{i === 0 ? 'Secondary group...' : 'Second secondary...'}</option>
+							{#each muscleGroups as group}
+								{#if group.id !== newGroupId && (i === 0 || group.id !== newSecondaryGroupIds[0])}
+									<option value={group.id}>{group.name}</option>
+								{/if}
+							{/each}
+						</select>
+					{/each}
+				</div>
+			</div>
+
 			<input
 				type="text"
 				bind:value={newNotes}
@@ -280,6 +317,29 @@
 										<option value={g.id}>{g.name}</option>
 									{/each}
 								</select>
+								<!-- Secondary groups in edit -->
+								<div>
+									<label class="text-xs text-text-muted">Secondary groups</label>
+									{#each [0, 1] as i}
+										<select
+											value={editSecondaryGroupIds[i] ?? ''}
+											onchange={(e) => {
+												const val = (e.target as HTMLSelectElement).value;
+												const updated = [...editSecondaryGroupIds];
+												if (val) { updated[i] = val; } else { updated.splice(i, 1); }
+												editSecondaryGroupIds = updated.filter(Boolean);
+											}}
+											class="w-full bg-dark-surface px-3 py-1.5 rounded border border-dark-border text-sm mt-1"
+										>
+											<option value="">None</option>
+											{#each muscleGroups as g}
+												{#if g.id !== editGroupId && (i === 0 || g.id !== editSecondaryGroupIds[0])}
+													<option value={g.id}>{g.name}</option>
+												{/if}
+											{/each}
+										</select>
+									{/each}
+								</div>
 								<label class="flex items-center gap-2 text-xs text-text-secondary">
 									<input type="checkbox" bind:checked={editIsBodyweight} class="accent-accent" />
 									Bodyweight
@@ -313,11 +373,17 @@
 									{#if ex.isBodyweight}
 										<span class="text-xs text-text-muted ml-1">BW</span>
 									{/if}
+									{#if ex.isPreset}
+										<span class="text-xs text-blue-400 ml-1">preset</span>
+									{/if}
 									{#if ex.incrementProfileId}
 										{@const prof = profiles.find(p => p.id === ex.incrementProfileId)}
 										{#if prof}
 											<span class="text-xs text-accent ml-1">· {prof.name}</span>
 										{/if}
+									{/if}
+									{#if ex.secondaryMuscleGroupIds && ex.secondaryMuscleGroupIds.length > 0}
+										<p class="text-xs text-text-muted mt-0.5">Secondary: {getSecondaryGroupNames(ex.secondaryMuscleGroupIds)}</p>
 									{/if}
 									{#if ex.notes}
 										<p class="text-xs text-text-muted mt-0.5">{ex.notes}</p>

@@ -24,7 +24,7 @@
 
 	const filteredExercises = $derived(
 		selectedGroupId
-			? exercises.filter(e => e.muscleGroupId === selectedGroupId)
+			? exercises.filter(e => e.muscleGroupId === selectedGroupId || e.secondaryMuscleGroupIds?.includes(selectedGroupId))
 			: exercises
 	);
 

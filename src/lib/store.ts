@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '$lib/db';
 import {
-	DEFAULT_SETTINGS, DEFAULT_MUSCLE_GROUPS,
+	DEFAULT_SETTINGS, DEFAULT_MUSCLE_GROUPS, PRESET_EXERCISES,
 	type Split, type SplitDay, type Exercise, type ExerciseSlot,
 	type WorkoutSession, type ExerciseLog, type SetLog, type Settings, type MuscleGroup, type Weekday,
 	type IncrementProfile
@@ -29,6 +29,37 @@ export async function initMuscleGroups(): Promise<void> {
 		const groups = DEFAULT_MUSCLE_GROUPS.map(name => ({ id: uuidv4(), name }));
 		await db.muscleGroups.bulkAdd(groups);
 	}
+}
+
+export async function initPresetExercises(): Promise<void> {
+	const existing = await db.exercises.count();
+	if (existing > 0) return; // Only seed on first run
+
+	const groups = await db.muscleGroups.toArray();
+	const groupMap = new Map(groups.map(g => [g.name, g.id]));
+
+	const exercises: Exercise[] = PRESET_EXERCISES.map(preset => {
+		const mainGroupId = groupMap.get(preset.mainGroup);
+		if (!mainGroupId) return null;
+
+		const secondaryIds = preset.secondaryGroups
+			?.map(name => groupMap.get(name))
+			.filter((id): id is string => !!id)
+			.slice(0, 2);
+
+		return {
+			id: uuidv4(),
+			name: preset.name,
+			muscleGroupId: mainGroupId,
+			secondaryMuscleGroupIds: secondaryIds?.length ? secondaryIds : undefined,
+			isBodyweight: preset.isBodyweight ?? false,
+			notes: preset.notes,
+			isPreset: true,
+			createdAt: new Date().toISOString()
+		};
+	}).filter((e): e is Exercise => e !== null);
+
+	await db.exercises.bulkAdd(exercises);
 }
 
 export async function getMuscleGroups(): Promise<MuscleGroup[]> {
@@ -128,8 +159,8 @@ export async function getSplitDays(splitId: string): Promise<SplitDay[]> {
 	return db.splitDays.where('splitId').equals(splitId).sortBy('order');
 }
 
-export async function createSplitDay(splitId: string, name: string, order: number, weekday?: Weekday): Promise<SplitDay> {
-	const day: SplitDay = { id: uuidv4(), splitId, name, order, weekday };
+export async function createSplitDay(splitId: string, name: string, order: number, weekday?: Weekday, defaultRepTarget?: number): Promise<SplitDay> {
+	const day: SplitDay = { id: uuidv4(), splitId, name, order, weekday, defaultRepTarget };
 	await db.splitDays.add(day);
 	return day;
 }
@@ -489,7 +520,7 @@ export async function getExerciseHistory(exerciseId: string): Promise<Array<{
 
 export async function exportAllData(): Promise<string> {
 	const data = {
-		version: 2,
+		version: 3,
 		exportedAt: new Date().toISOString(),
 		settings: getSettings(),
 		splits: await db.splits.toArray(),
@@ -507,7 +538,7 @@ export async function exportAllData(): Promise<string> {
 
 export async function importAllData(json: string): Promise<void> {
 	const data = JSON.parse(json);
-	if (data.version !== 1 && data.version !== 2) throw new Error('Unsupported export version');
+	if (data.version !== 1 && data.version !== 2 && data.version !== 3) throw new Error('Unsupported export version');
 
 	await db.transaction('rw',
 		[db.splits, db.splitDays, db.muscleGroups, db.exercises,
