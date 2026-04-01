@@ -1,7 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type {
 	Split, SplitDay, Exercise, ExerciseSlot,
-	WorkoutSession, ExerciseLog, SetLog, MuscleGroup, IncrementProfile
+	WorkoutSession, ExerciseLog, SetLog, MuscleGroup, IncrementProfile, WorkoutBreak
 } from '$lib/types';
 
 const db = new Dexie('WorkoutTracker') as Dexie & {
@@ -14,6 +14,7 @@ const db = new Dexie('WorkoutTracker') as Dexie & {
 	exerciseLogs: EntityTable<ExerciseLog, 'id'>;
 	setLogs: EntityTable<SetLog, 'id'>;
 	incrementProfiles: EntityTable<IncrementProfile, 'id'>;
+	workoutBreaks: EntityTable<WorkoutBreak, 'id'>;
 };
 
 db.version(1).stores({
@@ -70,6 +71,20 @@ db.version(4).stores({
 	exerciseLogs: 'id, sessionId, exerciseId, slotId',
 	setLogs: 'id, exerciseLogId, setNumber',
 	incrementProfiles: 'id, name'
+});
+
+// Migration: add workoutBreaks table, initialWeight/initialReps/initialSets on exercises
+db.version(5).stores({
+	splits: 'id, type, createdAt',
+	splitDays: 'id, splitId, weekday, order',
+	muscleGroups: 'id, name',
+	exercises: 'id, name, muscleGroupId, createdAt',
+	exerciseSlots: 'id, splitDayId, order, exerciseId',
+	workoutSessions: 'id, splitDayId, splitId, date, status',
+	exerciseLogs: 'id, sessionId, exerciseId, slotId',
+	setLogs: 'id, exerciseLogId, setNumber',
+	incrementProfiles: 'id, name',
+	workoutBreaks: 'id, startDate, endDate, reason'
 });
 
 export { db };

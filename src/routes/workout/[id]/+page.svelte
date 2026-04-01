@@ -99,8 +99,7 @@
 		const exercise = await getExercise(eid);
 		// Rep target resolution: slot → exercise → split day → global
 		const splitDayRepTarget = splitDay?.defaultRepTarget;
-		const slotTargetReps = slot.targetReps ?? exercise?.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
-		const repTarget = exercise?.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
+		const repTargetCeiling = exercise?.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
 		const increment = settings.defaultWeightIncrement;
 
 		// Load increment profile if exercise references one
@@ -109,35 +108,69 @@
 			profile = await getIncrementProfile(exercise.incrementProfileId);
 		}
 
-		for (let i = 0; i < slot.targetSets; i++) {
-			let targetWeight = 0;
-			let targetReps = slotTargetReps;
+		if (last && last.sets.length > 0) {
+			// Per-set progression from previous session
+			const progression = calculateProgression(
+				last.sets,
+				repTargetCeiling,
+				increment,
+				exercise?.weightIncrements,
+				profile
+			);
 
-			if (last && last.sets[i]) {
-				const prog = calculateProgression(
-					last.sets.filter(s => s.completed),
-					repTarget,
-					increment,
-					exercise?.weightIncrements,
-					profile
-				);
-				targetWeight = prog.suggestedWeight;
-				targetReps = prog.suggestedReps;
-			} else if (last) {
-				targetWeight = last.weight;
-				targetReps = last.reps + 1;
+			for (let i = 0; i < slot.targetSets; i++) {
+				let targetWeight: number;
+				let targetReps: number;
+
+				if (i < progression.length) {
+					targetWeight = progression[i].suggestedWeight;
+					targetReps = progression[i].suggestedReps;
+				} else {
+					// Extra sets beyond previous — use last suggestion
+					const lastProg = progression[progression.length - 1];
+					targetWeight = lastProg.suggestedWeight;
+					targetReps = lastProg.suggestedReps;
+				}
+
+				if (exercise?.isBodyweight) targetWeight = 0;
+
+				await createSetLog({
+					exerciseLogId: log.id,
+					setNumber: i + 1,
+					targetWeight,
+					targetReps,
+					isWarmup: false,
+					completed: false
+				});
 			}
+		} else {
+			// No history — use initial values from exercise
+			for (let i = 0; i < slot.targetSets; i++) {
+				let targetWeight = 0;
+				let targetReps = slot.targetReps ?? repTargetCeiling - 4;
+				if (targetReps < 1) targetReps = 1;
 
-			if (exercise?.isBodyweight) targetWeight = 0;
+				if (exercise?.initialSets && exercise.initialSets[i]) {
+					// Per-set pyramid initial values
+					targetWeight = exercise.initialSets[i].weight;
+					targetReps = exercise.initialSets[i].reps;
+				} else if (exercise?.initialWeight !== undefined || exercise?.initialReps !== undefined) {
+					// Default initial values
+					targetWeight = exercise?.initialWeight ?? 0;
+					targetReps = exercise?.initialReps ?? targetReps;
+				}
 
-			await createSetLog({
-				exerciseLogId: log.id,
-				setNumber: i + 1,
-				targetWeight,
-				targetReps,
-				isWarmup: false,
-				completed: false
-			});
+				if (exercise?.isBodyweight) targetWeight = 0;
+
+				await createSetLog({
+					exerciseLogId: log.id,
+					setNumber: i + 1,
+					targetWeight,
+					targetReps,
+					isWarmup: false,
+					completed: false
+				});
+			}
 		}
 
 		goto(`/workout/${session.id}/exercise/${log.id}`);
@@ -146,7 +179,7 @@
 	async function handleFinishWorkout() {
 		if (!session) return;
 		await finishWorkoutSession(session.id);
-		goto('/');
+		goto(`/workout/${session.id}/complete`);
 	}
 
 	async function handleAbandonWorkout() {

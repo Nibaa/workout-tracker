@@ -4,7 +4,7 @@ import {
 	DEFAULT_SETTINGS, DEFAULT_MUSCLE_GROUPS, PRESET_EXERCISES,
 	type Split, type SplitDay, type Exercise, type ExerciseSlot,
 	type WorkoutSession, type ExerciseLog, type SetLog, type Settings, type MuscleGroup, type Weekday,
-	type IncrementProfile
+	type IncrementProfile, type WorkoutBreak, type BreakReason
 } from '$lib/types';
 
 // ─── Settings ───
@@ -356,34 +356,45 @@ export async function getLastPerformance(exerciseId: string, splitDayId: string)
 }
 
 /**
- * Calculate suggested weight and reps for the next workout.
- * - If all sets hit the rep target → increase weight, reset reps
- * - Otherwise → increase target reps by 1
+ * Calculate suggested weight and reps for each set in the next workout.
  *
- * If an incrementProfile is provided, weight jumps to the next available
- * weight in the profile instead of adding a fixed increment.
+ * Logic:
+ * 1. If ALL sets hit the rep target ceiling → increase weight, reset reps
+ * 2. If all sets hit their previous target → next target = lowestActualReps + 1
+ * 3. If any set missed the target → target stays the same
+ * 4. "Going over": if some sets exceed the target, next = lowestActualReps + 1
+ *
+ * Returns per-set suggestions (weight and reps for each set).
  */
 export function calculateProgression(
 	lastSets: SetLog[],
-	repTarget: number,
+	repTargetCeiling: number,
 	weightIncrement: number,
 	customIncrements?: number[],
 	incrementProfile?: IncrementProfile
-): { suggestedWeight: number; suggestedReps: number } {
+): { suggestedWeight: number; suggestedReps: number }[] {
 	if (lastSets.length === 0) {
-		return { suggestedWeight: 0, suggestedReps: repTarget - 4 };
+		return [];
 	}
 
-	const lastWeight = lastSets[0].actualWeight ?? lastSets[0].targetWeight;
-	const allSetsHitTarget = lastSets.every(s => (s.actualReps ?? 0) >= repTarget);
+	const completedSets = lastSets.filter(s => s.completed);
+	if (completedSets.length === 0) {
+		return lastSets.map(s => ({ suggestedWeight: s.targetWeight, suggestedReps: s.targetReps }));
+	}
 
-	if (allSetsHitTarget) {
+	const lastWeight = completedSets[0].actualWeight ?? completedSets[0].targetWeight;
+	const lowestActualReps = Math.min(...completedSets.map(s => s.actualReps ?? 0));
+	const allHitCeiling = completedSets.every(s => (s.actualReps ?? 0) >= repTargetCeiling);
+	const previousTarget = completedSets[0].targetReps;
+	const allHitTarget = completedSets.every(s => (s.actualReps ?? 0) >= previousTarget);
+
+	if (allHitCeiling) {
+		// Weight increase — all sets hit the ceiling
 		let newWeight: number;
 
 		if (incrementProfile) {
-			// Jump to next available weight in profile
 			const next = getNextWeightInProfile(lastWeight, incrementProfile);
-			newWeight = next ?? lastWeight; // Stay at max if no higher weight available
+			newWeight = next ?? lastWeight;
 		} else if (customIncrements && customIncrements.length > 0) {
 			const sorted = [...customIncrements].sort((a, b) => a - b);
 			newWeight = lastWeight + sorted[0];
@@ -391,18 +402,28 @@ export function calculateProgression(
 			newWeight = lastWeight + weightIncrement;
 		}
 
-		return {
+		// Reset reps: start fresh at a base level (ceiling - 4, minimum 1)
+		const resetReps = Math.max(1, repTargetCeiling - 4);
+		return lastSets.map(() => ({
 			suggestedWeight: newWeight,
-			suggestedReps: lastSets[0].targetReps // Reset to original target reps (lower end)
-		};
+			suggestedReps: resetReps
+		}));
 	}
 
-	// Rep increase: suggest one more rep than last achieved
-	const minReps = Math.min(...lastSets.map(s => s.actualReps ?? 0));
-	return {
+	// Rep progression — uniform target across all sets
+	let nextTarget: number;
+	if (allHitTarget) {
+		// Succeeded: increment from lowest actual reps
+		nextTarget = lowestActualReps + 1;
+	} else {
+		// Failed to hit target in at least one set: keep same target
+		nextTarget = previousTarget;
+	}
+
+	return lastSets.map(() => ({
 		suggestedWeight: lastWeight,
-		suggestedReps: minReps + 1
-	};
+		suggestedReps: nextTarget
+	}));
 }
 
 // ─── Alternating Exercise Logic ───
@@ -538,11 +559,137 @@ export async function getExerciseHistory(exerciseId: string): Promise<Array<{
 	return history.sort((a, b) => a.date.localeCompare(b.date));
 }
 
+// ─── Workout Breaks ───
+
+export async function getWorkoutBreaks(): Promise<WorkoutBreak[]> {
+	return db.workoutBreaks.orderBy('startDate').reverse().toArray();
+}
+
+export async function getBreakForDate(date: string): Promise<WorkoutBreak | undefined> {
+	return db.workoutBreaks.filter(b => date >= b.startDate && date <= b.endDate).first();
+}
+
+export async function getBreaksInRange(startDate: string, endDate: string): Promise<WorkoutBreak[]> {
+	return db.workoutBreaks.filter(b => b.endDate >= startDate && b.startDate <= endDate).toArray();
+}
+
+export async function createWorkoutBreak(data: Omit<WorkoutBreak, 'id'>): Promise<WorkoutBreak> {
+	const brk: WorkoutBreak = { ...data, id: uuidv4() };
+	await db.workoutBreaks.add(brk);
+	return brk;
+}
+
+export async function updateWorkoutBreak(id: string, updates: Partial<Omit<WorkoutBreak, 'id'>>): Promise<void> {
+	await db.workoutBreaks.update(id, updates);
+}
+
+export async function deleteWorkoutBreak(id: string): Promise<void> {
+	await db.workoutBreaks.delete(id);
+}
+
+// ─── Streak Calculation ───
+
+/**
+ * Calculate the current workout streak in weeks.
+ * A week counts as active if it has at least one workout OR is covered by a break.
+ * The streak breaks if a full week passes with no workout and no break.
+ * @param gapDays Maximum days between workouts before streak breaks (default 7)
+ */
+export async function getWorkoutStreak(gapDays: number = 7): Promise<{
+	currentStreakWeeks: number;
+	currentStreakDays: number;
+	longestStreakDays: number;
+	totalWorkouts: number;
+	lastWorkoutDate?: string;
+}> {
+	const sessions = await db.workoutSessions
+		.where('status').equals('completed')
+		.sortBy('date');
+	const breaks = await db.workoutBreaks.toArray();
+
+	if (sessions.length === 0) {
+		return { currentStreakWeeks: 0, currentStreakDays: 0, longestStreakDays: 0, totalWorkouts: 0 };
+	}
+
+	const today = new Date().toISOString().split('T')[0];
+
+	// Build a set of all "active" dates (workout days + break days)
+	const activeDates = new Set<string>();
+	for (const s of sessions) {
+		activeDates.add(s.date);
+	}
+	for (const b of breaks) {
+		const start = new Date(b.startDate);
+		const end = new Date(b.endDate);
+		for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+			activeDates.add(d.toISOString().split('T')[0]);
+		}
+	}
+
+	// Calculate current streak: count backwards from today
+	let currentStreakDays = 0;
+	let d = new Date(today);
+	let consecutiveInactiveDays = 0;
+
+	while (consecutiveInactiveDays < gapDays) {
+		const dateStr = d.toISOString().split('T')[0];
+		if (activeDates.has(dateStr)) {
+			currentStreakDays++;
+			consecutiveInactiveDays = 0;
+		} else {
+			consecutiveInactiveDays++;
+		}
+		d.setDate(d.getDate() - 1);
+		// Safety: don't go back more than 5 years
+		if (currentStreakDays + consecutiveInactiveDays > 1825) break;
+	}
+
+	// Current streak in weeks
+	const currentStreakWeeks = Math.floor(currentStreakDays / 7);
+
+	// Calculate longest streak
+	let longestStreakDays = 0;
+	let tempStreak = 0;
+	let tempInactive = 0;
+
+	const sortedDates = [...activeDates].sort();
+	if (sortedDates.length > 0) {
+		const first = new Date(sortedDates[0]);
+		const last = new Date(sortedDates[sortedDates.length - 1]);
+		tempStreak = 0;
+		tempInactive = 0;
+
+		for (let dd = new Date(first); dd <= last; dd.setDate(dd.getDate() + 1)) {
+			const ds = dd.toISOString().split('T')[0];
+			if (activeDates.has(ds)) {
+				tempStreak++;
+				tempInactive = 0;
+				longestStreakDays = Math.max(longestStreakDays, tempStreak);
+			} else {
+				tempInactive++;
+				if (tempInactive >= gapDays) {
+					tempStreak = 0;
+				}
+			}
+		}
+	}
+
+	const lastWorkoutDate = sessions.length > 0 ? sessions[sessions.length - 1].date : undefined;
+
+	return {
+		currentStreakWeeks,
+		currentStreakDays,
+		longestStreakDays,
+		totalWorkouts: sessions.length,
+		lastWorkoutDate
+	};
+}
+
 // ─── Data Export / Import ───
 
 export async function exportAllData(): Promise<string> {
 	const data = {
-		version: 3,
+		version: 5,
 		exportedAt: new Date().toISOString(),
 		settings: getSettings(),
 		splits: await db.splits.toArray(),
@@ -553,18 +700,19 @@ export async function exportAllData(): Promise<string> {
 		workoutSessions: await db.workoutSessions.toArray(),
 		exerciseLogs: await db.exerciseLogs.toArray(),
 		setLogs: await db.setLogs.toArray(),
-		incrementProfiles: await db.incrementProfiles.toArray()
+		incrementProfiles: await db.incrementProfiles.toArray(),
+		workoutBreaks: await db.workoutBreaks.toArray()
 	};
 	return JSON.stringify(data, null, 2);
 }
 
 export async function importAllData(json: string): Promise<void> {
 	const data = JSON.parse(json);
-	if (data.version !== 1 && data.version !== 2 && data.version !== 3) throw new Error('Unsupported export version');
+	if (![1, 2, 3, 4, 5].includes(data.version)) throw new Error('Unsupported export version');
 
 	await db.transaction('rw',
 		[db.splits, db.splitDays, db.muscleGroups, db.exercises,
-		 db.exerciseSlots, db.workoutSessions, db.exerciseLogs, db.setLogs, db.incrementProfiles],
+		 db.exerciseSlots, db.workoutSessions, db.exerciseLogs, db.setLogs, db.incrementProfiles, db.workoutBreaks],
 		async () => {
 			await db.splits.clear();
 			await db.splitDays.clear();
@@ -575,6 +723,7 @@ export async function importAllData(json: string): Promise<void> {
 			await db.exerciseLogs.clear();
 			await db.setLogs.clear();
 			await db.incrementProfiles.clear();
+			await db.workoutBreaks.clear();
 
 			if (data.splits) await db.splits.bulkAdd(data.splits);
 			if (data.splitDays) await db.splitDays.bulkAdd(data.splitDays);
@@ -585,6 +734,7 @@ export async function importAllData(json: string): Promise<void> {
 			if (data.exerciseLogs) await db.exerciseLogs.bulkAdd(data.exerciseLogs);
 			if (data.setLogs) await db.setLogs.bulkAdd(data.setLogs);
 			if (data.incrementProfiles) await db.incrementProfiles.bulkAdd(data.incrementProfiles);
+			if (data.workoutBreaks) await db.workoutBreaks.bulkAdd(data.workoutBreaks);
 		}
 	);
 

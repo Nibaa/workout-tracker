@@ -30,7 +30,7 @@
 		if (sets.length > 0 && currentSetIndex < sets.length) {
 			const set = sets[currentSetIndex];
 			inputWeight = set.targetWeight;
-			inputReps = undefined; // User must fill in reps
+			inputReps = set.targetReps; // Auto-fill with target reps (user can change)
 		}
 	});
 
@@ -247,7 +247,7 @@
 						<input
 							type="number"
 							bind:value={inputReps}
-							placeholder="{currentSet.targetReps}"
+							placeholder="reps"
 							min="0"
 							class="flex-1 bg-dark-surface text-center text-2xl font-bold py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none placeholder:text-text-muted"
 						/>

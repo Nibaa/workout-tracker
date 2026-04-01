@@ -45,6 +45,12 @@ export interface Exercise {
 	incrementProfileId?: string;
 	/** Per-exercise rep target override. When all sets hit this, suggest weight increase */
 	repTarget?: number;
+	/** Initial weight (kg) when starting this exercise with no history */
+	initialWeight?: number;
+	/** Initial reps when starting this exercise with no history */
+	initialReps?: number;
+	/** Per-set initial values for pyramid/varying setups. Overrides initialWeight/initialReps when present. */
+	initialSets?: Array<{ weight: number; reps: number }>;
 	/** Whether this is a preset exercise (not deletable, but editable) */
 	isPreset?: boolean;
 	createdAt: string;
@@ -113,6 +119,23 @@ export const DEFAULT_SETTINGS: Settings = {
 	defaultRepTarget: 12,
 	defaultWeightIncrement: 2.5,
 	theme: 'dark'
+};
+
+export type BreakReason = 'vacation' | 'illness' | 'injury' | 'other';
+
+export interface WorkoutBreak {
+	id: string;
+	startDate: string; // ISO date (YYYY-MM-DD)
+	endDate: string;   // ISO date (YYYY-MM-DD)
+	reason: BreakReason;
+	customReason?: string;
+}
+
+export const BREAK_REASON_LABELS: Record<BreakReason, string> = {
+	vacation: 'Vacation',
+	illness: 'Illness',
+	injury: 'Injury',
+	other: 'Other'
 };
 
 export const WEEKDAYS: Weekday[] = [
