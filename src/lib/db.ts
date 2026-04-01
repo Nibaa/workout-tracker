@@ -87,4 +87,42 @@ db.version(5).stores({
 	workoutBreaks: 'id, startDate, endDate, reason'
 });
 
+// Migration: move weightIncrements, incrementProfileId, repTarget, initialWeight/Reps/Sets
+// from exercises to exerciseSlots (split-specific, not exercise-inherent)
+db.version(6).stores({
+	splits: 'id, type, createdAt',
+	splitDays: 'id, splitId, weekday, order',
+	muscleGroups: 'id, name',
+	exercises: 'id, name, muscleGroupId, createdAt',
+	exerciseSlots: 'id, splitDayId, order, exerciseId',
+	workoutSessions: 'id, splitDayId, splitId, date, status',
+	exerciseLogs: 'id, sessionId, exerciseId, slotId',
+	setLogs: 'id, exerciseLogId, setNumber',
+	incrementProfiles: 'id, name',
+	workoutBreaks: 'id, startDate, endDate, reason'
+}).upgrade(tx => {
+	// Copy fields from exercises to their slots as a migration convenience
+	return tx.table('exercises').toCollection().each(async (exercise: any) => {
+		if (exercise.incrementProfileId || exercise.weightIncrements || exercise.repTarget ||
+			exercise.initialWeight !== undefined || exercise.initialReps !== undefined || exercise.initialSets) {
+			// Find all slots using this exercise and apply the exercise-level values as defaults
+			const slots = await tx.table('exerciseSlots').filter(
+				(slot: any) => slot.exerciseId === exercise.id
+			).toArray();
+			for (const slot of slots) {
+				const updates: any = {};
+				if (exercise.incrementProfileId && !slot.incrementProfileId) updates.incrementProfileId = exercise.incrementProfileId;
+				if (exercise.weightIncrements && !slot.weightIncrements) updates.weightIncrements = exercise.weightIncrements;
+				if (exercise.repTarget && !slot.repTarget) updates.repTarget = exercise.repTarget;
+				if (exercise.initialWeight !== undefined && slot.initialWeight === undefined) updates.initialWeight = exercise.initialWeight;
+				if (exercise.initialReps !== undefined && slot.initialReps === undefined) updates.initialReps = exercise.initialReps;
+				if (exercise.initialSets && !slot.initialSets) updates.initialSets = exercise.initialSets;
+				if (Object.keys(updates).length > 0) {
+					await tx.table('exerciseSlots').update(slot.id, updates);
+				}
+			}
+		}
+	});
+});
+
 export { db };

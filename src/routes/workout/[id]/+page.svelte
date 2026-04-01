@@ -97,15 +97,15 @@
 		// Create target sets based on progression
 		const last = await getLastPerformance(eid, session.splitDayId);
 		const exercise = await getExercise(eid);
-		// Rep target resolution: slot → exercise → split day → global
+		// Rep target resolution: slot → split day → global
 		const splitDayRepTarget = splitDay?.defaultRepTarget;
-		const repTargetCeiling = exercise?.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
+		const repTargetCeiling = slot.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
 		const increment = settings.defaultWeightIncrement;
 
-		// Load increment profile if exercise references one
+		// Load increment profile from slot
 		let profile: IncrementProfile | undefined;
-		if (exercise?.incrementProfileId) {
-			profile = await getIncrementProfile(exercise.incrementProfileId);
+		if (slot.incrementProfileId) {
+			profile = await getIncrementProfile(slot.incrementProfileId);
 		}
 
 		if (last && last.sets.length > 0) {
@@ -114,7 +114,7 @@
 				last.sets,
 				repTargetCeiling,
 				increment,
-				exercise?.weightIncrements,
+				slot.weightIncrements,
 				profile
 			);
 
@@ -144,20 +144,20 @@
 				});
 			}
 		} else {
-			// No history — use initial values from exercise
+			// No history — use initial values from slot
 			for (let i = 0; i < slot.targetSets; i++) {
 				let targetWeight = 0;
 				let targetReps = slot.targetReps ?? repTargetCeiling - 4;
 				if (targetReps < 1) targetReps = 1;
 
-				if (exercise?.initialSets && exercise.initialSets[i]) {
+				if (slot.initialSets && slot.initialSets[i]) {
 					// Per-set pyramid initial values
-					targetWeight = exercise.initialSets[i].weight;
-					targetReps = exercise.initialSets[i].reps;
-				} else if (exercise?.initialWeight !== undefined || exercise?.initialReps !== undefined) {
+					targetWeight = slot.initialSets[i].weight;
+					targetReps = slot.initialSets[i].reps;
+				} else if (slot.initialWeight !== undefined || slot.initialReps !== undefined) {
 					// Default initial values
-					targetWeight = exercise?.initialWeight ?? 0;
-					targetReps = exercise?.initialReps ?? targetReps;
+					targetWeight = slot.initialWeight ?? 0;
+					targetReps = slot.initialReps ?? targetReps;
 				}
 
 				if (exercise?.isBodyweight) targetWeight = 0;

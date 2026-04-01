@@ -4,10 +4,11 @@
 	import { page } from '$app/stores';
 	import { getSetLogs, updateSetLog, finishExerciseLog, getExercise, getSettings, getIncrementProfile, getNextWeightInProfile, getPrevWeightInProfile } from '$lib/store';
 	import { db } from '$lib/db';
-	import type { ExerciseLog, SetLog, Exercise, Settings, IncrementProfile } from '$lib/types';
+	import type { ExerciseLog, SetLog, Exercise, ExerciseSlot, Settings, IncrementProfile } from '$lib/types';
 
 	let exerciseLog = $state<ExerciseLog | undefined>();
 	let exercise = $state<Exercise | undefined>();
+	let slot = $state<ExerciseSlot | undefined>();
 	let sets = $state<SetLog[]>([]);
 	let currentSetIndex = $state(0);
 	let loading = $state(true);
@@ -49,8 +50,12 @@
 		if (!exerciseLog) { goto(`/workout/${sessionId}`); return; }
 
 		exercise = await getExercise(exerciseLog.exerciseId);
-		if (exercise?.incrementProfileId) {
-			profile = await getIncrementProfile(exercise.incrementProfileId);
+		// Load slot for weight profile and increments
+		if (exerciseLog.slotId) {
+			slot = await db.exerciseSlots.get(exerciseLog.slotId);
+		}
+		if (slot?.incrementProfileId) {
+			profile = await getIncrementProfile(slot.incrementProfileId);
 		}
 		sets = await getSetLogs(logId);
 
@@ -206,7 +211,7 @@
 										const prev = getPrevWeightInProfile(inputWeight, profile);
 										inputWeight = prev ?? 0;
 									} else {
-										inputWeight = Math.max(0, inputWeight - (exercise!.weightIncrements?.[0] ?? settings.defaultWeightIncrement));
+										inputWeight = Math.max(0, inputWeight - (slot?.weightIncrements?.[0] ?? settings.defaultWeightIncrement));
 									}
 								}}
 								class="w-12 h-12 bg-dark-surface rounded-lg text-xl font-bold text-text-secondary hover:text-text-primary transition-colors"
@@ -224,7 +229,7 @@
 										const next = getNextWeightInProfile(inputWeight, profile);
 										if (next !== undefined) inputWeight = next;
 									} else {
-										inputWeight += (exercise!.weightIncrements?.[0] ?? settings.defaultWeightIncrement);
+										inputWeight += (slot?.weightIncrements?.[0] ?? settings.defaultWeightIncrement);
 									}
 								}}
 								class="w-12 h-12 bg-dark-surface rounded-lg text-xl font-bold text-text-secondary hover:text-text-primary transition-colors"

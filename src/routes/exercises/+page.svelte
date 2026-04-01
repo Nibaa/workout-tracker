@@ -1,12 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getExercises, createExercise, updateExercise, deleteExercise, getMuscleGroups, addMuscleGroup, getSettings, getIncrementProfiles } from '$lib/store';
-	import type { Exercise, MuscleGroup, Settings, IncrementProfile } from '$lib/types';
+	import { getExercises, createExercise, updateExercise, deleteExercise, getMuscleGroups, addMuscleGroup } from '$lib/store';
+	import type { Exercise, MuscleGroup } from '$lib/types';
 
 	let exercises = $state<Exercise[]>([]);
 	let muscleGroups = $state<MuscleGroup[]>([]);
-	let settings = $state<Settings>(getSettings());
-	let profiles = $state<IncrementProfile[]>([]);
 	let loading = $state(true);
 	let filterGroup = $state('');
 	let searchQuery = $state('');
@@ -18,13 +16,6 @@
 	let newSecondaryGroupIds = $state<string[]>([]);
 	let newIsBodyweight = $state(false);
 	let newNotes = $state('');
-	let newRepTarget = $state<number | undefined>();
-	let newWeightIncrements = $state('');
-	let newProfileId = $state('');
-	let newInitialWeight = $state<number | undefined>();
-	let newInitialReps = $state<number | undefined>();
-	let newUsePerSet = $state(false);
-	let newInitialSets = $state<Array<{ weight: number; reps: number }>>([]);
 
 	// Edit state
 	let editingId = $state<string | null>(null);
@@ -33,22 +24,13 @@
 	let editSecondaryGroupIds = $state<string[]>([]);
 	let editIsBodyweight = $state(false);
 	let editNotes = $state('');
-	let editRepTarget = $state<number | undefined>();
-	let editWeightIncrements = $state('');
-	let editProfileId = $state('');
-	let editInitialWeight = $state<number | undefined>();
-	let editInitialReps = $state<number | undefined>();
-	let editUsePerSet = $state(false);
-	let editInitialSets = $state<Array<{ weight: number; reps: number }>>([]);
 
 	// New group
 	let showNewGroup = $state(false);
 	let newGroupName = $state('');
 
 	onMount(async () => {
-		settings = getSettings();
 		muscleGroups = await getMuscleGroups();
-		profiles = await getIncrementProfiles();
 		await loadExercises();
 	});
 
@@ -79,22 +61,13 @@
 
 	async function handleCreate() {
 		if (!newName.trim() || !newGroupId) return;
-		const increments = newWeightIncrements
-			? newWeightIncrements.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
-			: undefined;
 
 		await createExercise({
 			name: newName.trim(),
 			muscleGroupId: newGroupId,
 			secondaryMuscleGroupIds: newSecondaryGroupIds.filter(id => id && id !== newGroupId).slice(0, 2) || undefined,
 			isBodyweight: newIsBodyweight,
-			notes: newNotes.trim() || undefined,
-			repTarget: newRepTarget,
-			weightIncrements: increments?.length ? increments : undefined,
-			incrementProfileId: newProfileId || undefined,
-			initialWeight: newInitialWeight,
-			initialReps: newInitialReps,
-			initialSets: newUsePerSet && newInitialSets.length > 0 ? newInitialSets : undefined
+			notes: newNotes.trim() || undefined
 		});
 
 		newName = '';
@@ -102,13 +75,6 @@
 		newSecondaryGroupIds = [];
 		newIsBodyweight = false;
 		newNotes = '';
-		newRepTarget = undefined;
-		newWeightIncrements = '';
-		newProfileId = '';
-		newInitialWeight = undefined;
-		newInitialReps = undefined;
-		newUsePerSet = false;
-		newInitialSets = [];
 		showCreate = false;
 		await loadExercises();
 	}
@@ -120,33 +86,17 @@
 		editSecondaryGroupIds = ex.secondaryMuscleGroupIds ? [...ex.secondaryMuscleGroupIds] : [];
 		editIsBodyweight = ex.isBodyweight;
 		editNotes = ex.notes ?? '';
-		editRepTarget = ex.repTarget;
-		editWeightIncrements = ex.weightIncrements?.join(', ') ?? '';
-		editProfileId = ex.incrementProfileId ?? '';
-		editInitialWeight = ex.initialWeight;
-		editInitialReps = ex.initialReps;
-		editUsePerSet = !!ex.initialSets && ex.initialSets.length > 0;
-		editInitialSets = ex.initialSets ? [...ex.initialSets] : [];
 	}
 
 	async function saveEdit() {
 		if (!editingId || !editName.trim() || !editGroupId) return;
-		const increments = editWeightIncrements
-			? editWeightIncrements.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
-			: undefined;
 
 		await updateExercise(editingId, {
 			name: editName.trim(),
 			muscleGroupId: editGroupId,
 			secondaryMuscleGroupIds: editSecondaryGroupIds.filter(id => id && id !== editGroupId).slice(0, 2) || undefined,
 			isBodyweight: editIsBodyweight,
-			notes: editNotes.trim() || undefined,
-			repTarget: editRepTarget,
-			weightIncrements: increments?.length ? increments : undefined,
-			incrementProfileId: editProfileId || undefined,
-			initialWeight: editInitialWeight,
-			initialReps: editInitialReps,
-			initialSets: editUsePerSet && editInitialSets.length > 0 ? editInitialSets : undefined
+			notes: editNotes.trim() || undefined
 		});
 
 		editingId = null;
@@ -279,76 +229,6 @@
 				class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border text-sm"
 			/>
 
-			<div class="flex gap-2">
-				<div class="flex-1">
-					<label class="text-xs text-text-muted">Rep target (override)</label>
-					<input type="number" bind:value={newRepTarget} placeholder="{settings.defaultRepTarget}"
-						class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
-				</div>
-				<div class="flex-1">
-					<label class="text-xs text-text-muted">Weight increments</label>
-					<input type="text" bind:value={newWeightIncrements} placeholder="e.g. 1, 1.5, 2"
-						class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
-				</div>
-			</div>
-
-			<div>
-				<label class="text-xs text-text-muted">Weight profile</label>
-				<select
-					bind:value={newProfileId}
-					class="w-full bg-dark-surface text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
-				>
-					<option value="">None (use increments)</option>
-					{#each profiles as p}
-						<option value={p.id}>{p.name} ({p.weights[0]}–{p.weights[p.weights.length - 1]} kg)</option>
-					{/each}
-				</select>
-				<p class="text-xs text-text-muted mt-0.5">Profile overrides custom increments. Manage in Settings.</p>
-			</div>
-
-			<!-- Initial Weight/Reps -->
-			{#if !newIsBodyweight}
-				<div class="flex gap-2">
-					<div class="flex-1">
-						<label class="text-xs text-text-muted">Starting weight (kg)</label>
-						<input type="number" bind:value={newInitialWeight} placeholder="0" step="0.5"
-							class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
-					</div>
-					<div class="flex-1">
-						<label class="text-xs text-text-muted">Starting reps</label>
-						<input type="number" bind:value={newInitialReps} placeholder="8"
-							class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
-					</div>
-				</div>
-			{/if}
-
-			<label class="flex items-center gap-2 text-sm text-text-secondary">
-				<input type="checkbox" bind:checked={newUsePerSet} class="accent-accent" />
-				Per-set values (pyramid)
-			</label>
-
-			{#if newUsePerSet}
-				<div class="space-y-2">
-					{#each newInitialSets as set, i}
-						<div class="flex gap-2 items-center">
-							<span class="text-xs text-text-muted w-6">S{i + 1}</span>
-							<input type="number" bind:value={set.weight} placeholder="kg" step="0.5"
-								class="flex-1 bg-dark-surface px-2 py-1 rounded border border-dark-border text-sm" />
-							<input type="number" bind:value={set.reps} placeholder="reps"
-								class="flex-1 bg-dark-surface px-2 py-1 rounded border border-dark-border text-sm" />
-							<button onclick={() => { newInitialSets = newInitialSets.filter((_, j) => j !== i); }}
-								class="text-danger text-xs">×</button>
-						</div>
-					{/each}
-					<button
-						onclick={() => { newInitialSets = [...newInitialSets, { weight: newInitialWeight ?? 0, reps: newInitialReps ?? 8 }]; }}
-						class="text-accent text-xs"
-					>
-						+ Add set
-					</button>
-				</div>
-			{/if}
-
 			<button
 				onclick={handleCreate}
 				disabled={!newName.trim() || !newGroupId}
@@ -412,61 +292,6 @@
 								<input type="text" bind:value={editNotes} placeholder="Notes"
 									class="w-full bg-dark-surface px-3 py-1.5 rounded border border-dark-border text-sm" />
 								<div class="flex gap-2">
-									<input type="number" bind:value={editRepTarget} placeholder="Rep target"
-										class="flex-1 bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
-									<input type="text" bind:value={editWeightIncrements} placeholder="Increments"
-										class="flex-1 bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
-								</div>
-								<select
-									bind:value={editProfileId}
-									class="w-full bg-dark-surface text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
-								>
-									<option value="">No weight profile</option>
-									{#each profiles as p}
-										<option value={p.id}>{p.name} ({p.weights[0]}–{p.weights[p.weights.length - 1]} kg)</option>
-									{/each}
-								</select>
-								<!-- Initial Weight/Reps edit -->
-								{#if !editIsBodyweight}
-									<div class="flex gap-2">
-										<div class="flex-1">
-											<label class="text-xs text-text-muted">Starting weight</label>
-											<input type="number" bind:value={editInitialWeight} placeholder="0" step="0.5"
-												class="w-full bg-dark-surface px-2 py-1 rounded border border-dark-border text-sm" />
-										</div>
-										<div class="flex-1">
-											<label class="text-xs text-text-muted">Starting reps</label>
-											<input type="number" bind:value={editInitialReps} placeholder="8"
-												class="w-full bg-dark-surface px-2 py-1 rounded border border-dark-border text-sm" />
-										</div>
-									</div>
-								{/if}
-								<label class="flex items-center gap-2 text-xs text-text-secondary">
-									<input type="checkbox" bind:checked={editUsePerSet} class="accent-accent" />
-									Per-set values (pyramid)
-								</label>
-								{#if editUsePerSet}
-									<div class="space-y-1">
-										{#each editInitialSets as set, i}
-											<div class="flex gap-2 items-center">
-												<span class="text-xs text-text-muted w-6">S{i + 1}</span>
-												<input type="number" bind:value={set.weight} placeholder="kg" step="0.5"
-													class="flex-1 bg-dark-surface px-2 py-1 rounded border border-dark-border text-sm" />
-												<input type="number" bind:value={set.reps} placeholder="reps"
-													class="flex-1 bg-dark-surface px-2 py-1 rounded border border-dark-border text-sm" />
-												<button onclick={() => { editInitialSets = editInitialSets.filter((_, j) => j !== i); }}
-													class="text-danger text-xs">×</button>
-											</div>
-										{/each}
-										<button
-											onclick={() => { editInitialSets = [...editInitialSets, { weight: editInitialWeight ?? 0, reps: editInitialReps ?? 8 }]; }}
-											class="text-accent text-xs"
-										>
-											+ Add set
-										</button>
-									</div>
-								{/if}
-								<div class="flex gap-2">
 									<button onclick={saveEdit} class="flex-1 bg-success text-white py-1.5 rounded text-sm">Save</button>
 									<button onclick={() => editingId = null} class="flex-1 bg-dark-surface text-text-secondary py-1.5 rounded text-sm">Cancel</button>
 								</div>
@@ -481,20 +306,8 @@
 									{#if ex.isPreset}
 										<span class="text-xs text-blue-400 ml-1">preset</span>
 									{/if}
-									{#if ex.incrementProfileId}
-										{@const prof = profiles.find(p => p.id === ex.incrementProfileId)}
-										{#if prof}
-											<span class="text-xs text-accent ml-1">· {prof.name}</span>
-										{/if}
-									{/if}
 									{#if ex.secondaryMuscleGroupIds && ex.secondaryMuscleGroupIds.length > 0}
 										<p class="text-xs text-text-muted mt-0.5">Secondary: {getSecondaryGroupNames(ex.secondaryMuscleGroupIds)}</p>
-									{/if}
-									{#if ex.initialWeight || ex.initialReps}
-										<p class="text-xs text-text-muted mt-0.5">Start: {ex.initialWeight ?? 0}kg × {ex.initialReps ?? '?'} reps</p>
-									{/if}
-									{#if ex.initialSets && ex.initialSets.length > 0}
-										<p class="text-xs text-text-muted mt-0.5">Pyramid: {ex.initialSets.map(s => `${s.weight}kg×${s.reps}`).join(', ')}</p>
 									{/if}
 									{#if ex.notes}
 										<p class="text-xs text-text-muted mt-0.5">{ex.notes}</p>

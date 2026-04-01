@@ -5,10 +5,11 @@
 	import {
 		getSplit, updateSplit, deleteSplit, getSplitDays, createSplitDay, updateSplitDay,
 		deleteSplitDay, getExerciseSlots, createExerciseSlot, updateExerciseSlot,
-		deleteExerciseSlot, getExercises, getMuscleGroups, getAllExerciseIdsForSlot
+		deleteExerciseSlot, getExercises, getMuscleGroups, getAllExerciseIdsForSlot,
+		getIncrementProfiles, getSettings
 	} from '$lib/store';
 	import type {
-		Split, SplitDay, ExerciseSlot, Exercise, MuscleGroup, ExerciseSlotType
+		Split, SplitDay, ExerciseSlot, Exercise, MuscleGroup, ExerciseSlotType, IncrementProfile, Settings
 	} from '$lib/types';
 	import { WEEKDAYS, WEEKDAY_LABELS, type Weekday } from '$lib/types';
 
@@ -18,6 +19,8 @@
 	let days = $state<Array<SplitDay & { slots: Array<ExerciseSlot & { exercise?: Exercise; alternateExercises?: Exercise[] }> }>>([]);
 	let allExercises = $state<Exercise[]>([]);
 	let muscleGroups = $state<MuscleGroup[]>([]);
+	let profiles = $state<IncrementProfile[]>([]);
+	let settings = $state<Settings>(getSettings());
 	let loading = $state(true);
 
 	// New day form
@@ -34,6 +37,13 @@
 	let newSlotSets = $state(3);
 	let newSlotReps = $state<number | undefined>();
 	let newSlotRest = $state<number | undefined>();
+	let newSlotProfileId = $state('');
+	let newSlotWeightIncrements = $state('');
+	let newSlotRepTarget = $state<number | undefined>();
+	let newSlotInitialWeight = $state<number | undefined>();
+	let newSlotInitialReps = $state<number | undefined>();
+	let newSlotUsePerSet = $state(false);
+	let newSlotInitialSets = $state<Array<{ weight: number; reps: number }>>([]);
 
 	// Edit name
 	let editingName = $state(false);
@@ -42,6 +52,8 @@
 	onMount(async () => {
 		allExercises = await getExercises();
 		muscleGroups = await getMuscleGroups();
+		profiles = await getIncrementProfiles();
+		settings = getSettings();
 		await loadData();
 	});
 
@@ -99,6 +111,10 @@
 		if (!day) return;
 
 		const altIds = newSlotType === 'alternating' ? newSlotAlternateIds.filter(id => id && id !== newSlotExerciseId) : undefined;
+		const increments = newSlotWeightIncrements
+			? newSlotWeightIncrements.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
+			: undefined;
+
 		await createExerciseSlot({
 			splitDayId: dayId,
 			order: day.slots.length,
@@ -107,7 +123,13 @@
 			alternateExerciseIds: altIds?.length ? altIds : undefined,
 			targetSets: newSlotSets,
 			targetReps: newSlotReps,
-			restSeconds: newSlotRest
+			restSeconds: newSlotRest,
+			incrementProfileId: newSlotProfileId || undefined,
+			weightIncrements: increments?.length ? increments : undefined,
+			repTarget: newSlotRepTarget,
+			initialWeight: newSlotInitialWeight,
+			initialReps: newSlotInitialReps,
+			initialSets: newSlotUsePerSet && newSlotInitialSets.length > 0 ? newSlotInitialSets : undefined
 		});
 
 		addingSlotForDay = null;
@@ -117,6 +139,13 @@
 		newSlotSets = 3;
 		newSlotReps = undefined;
 		newSlotRest = undefined;
+		newSlotProfileId = '';
+		newSlotWeightIncrements = '';
+		newSlotRepTarget = undefined;
+		newSlotInitialWeight = undefined;
+		newSlotInitialReps = undefined;
+		newSlotUsePerSet = false;
+		newSlotInitialSets = [];
 		await loadData();
 	}
 
@@ -192,12 +221,25 @@
 									{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
 										<span class="text-warning"> ↔ {slot.alternateExercises.map(e => e.name).join(' ↔ ')}</span>
 									{/if}
+									{#if slot.incrementProfileId}
+										{@const prof = profiles.find(p => p.id === slot.incrementProfileId)}
+										{#if prof}
+											<span class="text-xs text-accent ml-1">· {prof.name}</span>
+										{/if}
+									{/if}
 									<div class="text-text-muted text-xs">
 										{slot.targetSets} sets
 										{#if slot.targetReps} · {slot.targetReps} reps{/if}
 										{#if slot.type !== 'core'} · <span class="capitalize">{slot.type}</span>{/if}
 										{#if slot.restSeconds} · {slot.restSeconds}s rest{/if}
+										{#if slot.repTarget} · {slot.repTarget} rep target{/if}
 									</div>
+									{#if slot.initialWeight || slot.initialReps}
+										<div class="text-text-muted text-xs">Start: {slot.initialWeight ?? 0}kg × {slot.initialReps ?? '?'} reps</div>
+									{/if}
+									{#if slot.initialSets && slot.initialSets.length > 0}
+										<div class="text-text-muted text-xs">Pyramid: {slot.initialSets.map(s => `${s.weight}kg×${s.reps}`).join(', ')}</div>
+									{/if}
 								</div>
 								<button onclick={() => handleDeleteSlot(slot.id)} class="text-danger text-xs">×</button>
 							</div>
@@ -289,6 +331,76 @@
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 						</div>
+
+						<!-- Weight Profile -->
+						{#if profiles.length > 0}
+							<div>
+								<label class="text-xs text-text-muted">Weight profile</label>
+								<select
+									bind:value={newSlotProfileId}
+									class="w-full bg-dark-surface text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
+								>
+									<option value="">None (use increments)</option>
+									{#each profiles as p}
+										<option value={p.id}>{p.name} ({p.weights[0]}–{p.weights[p.weights.length - 1]} kg)</option>
+									{/each}
+								</select>
+							</div>
+						{/if}
+
+						<div class="flex gap-2">
+							<div class="flex-1">
+								<label class="text-xs text-text-muted">Rep target (override)</label>
+								<input type="number" bind:value={newSlotRepTarget} min="1" placeholder="{settings.defaultRepTarget}"
+									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+							</div>
+							<div class="flex-1">
+								<label class="text-xs text-text-muted">Weight increments</label>
+								<input type="text" bind:value={newSlotWeightIncrements} placeholder="e.g. 1, 1.5, 2"
+									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+							</div>
+						</div>
+
+						<!-- Initial Weight/Reps -->
+						<div class="flex gap-2">
+							<div class="flex-1">
+								<label class="text-xs text-text-muted">Starting weight (kg)</label>
+								<input type="number" bind:value={newSlotInitialWeight} placeholder="0" step="0.5"
+									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+							</div>
+							<div class="flex-1">
+								<label class="text-xs text-text-muted">Starting reps</label>
+								<input type="number" bind:value={newSlotInitialReps} placeholder="8"
+									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+							</div>
+						</div>
+
+						<label class="flex items-center gap-2 text-xs text-text-secondary">
+							<input type="checkbox" bind:checked={newSlotUsePerSet} class="accent-accent" />
+							Per-set values (pyramid)
+						</label>
+
+						{#if newSlotUsePerSet}
+							<div class="space-y-2">
+								{#each newSlotInitialSets as set, i}
+									<div class="flex gap-2 items-center">
+										<span class="text-xs text-text-muted w-6">S{i + 1}</span>
+										<input type="number" bind:value={set.weight} placeholder="kg" step="0.5"
+											class="flex-1 bg-dark-surface px-2 py-1 rounded border border-dark-border text-sm" />
+										<input type="number" bind:value={set.reps} placeholder="reps"
+											class="flex-1 bg-dark-surface px-2 py-1 rounded border border-dark-border text-sm" />
+										<button onclick={() => { newSlotInitialSets = newSlotInitialSets.filter((_, j) => j !== i); }}
+											class="text-danger text-xs">×</button>
+									</div>
+								{/each}
+								<button
+									onclick={() => { newSlotInitialSets = [...newSlotInitialSets, { weight: newSlotInitialWeight ?? 0, reps: newSlotInitialReps ?? 8 }]; }}
+									class="text-accent text-xs"
+								>
+									+ Add set
+								</button>
+							</div>
+						{/if}
 
 						<div class="flex gap-2">
 							<button
