@@ -45,6 +45,19 @@
 	let newSlotUsePerSet = $state(false);
 	let newSlotInitialSets = $state<Array<{ weight: number; reps: number }>>([]);
 
+	// Edit slot
+	let editingSlotId = $state<string | null>(null);
+	let editSlotSets = $state(3);
+	let editSlotReps = $state<number | undefined>();
+	let editSlotRest = $state<number | undefined>();
+	let editSlotProfileId = $state('');
+	let editSlotWeightIncrements = $state('');
+	let editSlotRepTarget = $state<number | undefined>();
+	let editSlotInitialWeight = $state<number | undefined>();
+	let editSlotInitialReps = $state<number | undefined>();
+	let editSlotUsePerSet = $state(false);
+	let editSlotInitialSets = $state<Array<{ weight: number; reps: number }>>([]);
+
 	// Edit name
 	let editingName = $state(false);
 	let editName = $state('');
@@ -154,6 +167,42 @@
 		await loadData();
 	}
 
+	function startEditSlot(slot: ExerciseSlot) {
+		editingSlotId = slot.id;
+		editSlotSets = slot.targetSets;
+		editSlotReps = slot.targetReps;
+		editSlotRest = slot.restSeconds;
+		editSlotProfileId = slot.incrementProfileId ?? '';
+		editSlotWeightIncrements = slot.weightIncrements?.join(', ') ?? '';
+		editSlotRepTarget = slot.repTarget;
+		editSlotInitialWeight = slot.initialWeight;
+		editSlotInitialReps = slot.initialReps;
+		editSlotUsePerSet = !!slot.initialSets && slot.initialSets.length > 0;
+		editSlotInitialSets = slot.initialSets ? [...slot.initialSets] : [];
+	}
+
+	async function saveEditSlot() {
+		if (!editingSlotId) return;
+		const increments = editSlotWeightIncrements
+			? editSlotWeightIncrements.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
+			: undefined;
+
+		await updateExerciseSlot(editingSlotId, {
+			targetSets: editSlotSets,
+			targetReps: editSlotReps,
+			restSeconds: editSlotRest,
+			incrementProfileId: editSlotProfileId || undefined,
+			weightIncrements: increments?.length ? increments : undefined,
+			repTarget: editSlotRepTarget,
+			initialWeight: editSlotInitialWeight,
+			initialReps: editSlotInitialReps,
+			initialSets: editSlotUsePerSet && editSlotInitialSets.length > 0 ? editSlotInitialSets : undefined
+		});
+
+		editingSlotId = null;
+		await loadData();
+	}
+
 	function getExercisesByGroup(groupId: string): Exercise[] {
 		return allExercises.filter(e => e.muscleGroupId === groupId);
 	}
@@ -214,6 +263,116 @@
 				{#if day.slots.length > 0}
 					<div class="space-y-2 mb-3">
 						{#each day.slots as slot, slotIndex}
+							{#if editingSlotId === slot.id}
+								<!-- Edit Slot Form -->
+								<div class="p-3 bg-dark-surface rounded-lg border border-accent space-y-3">
+									<div class="flex items-center justify-between">
+										<span class="text-sm font-medium">{slot.exercise?.name ?? 'Unknown'}</span>
+										<span class="text-xs text-text-muted capitalize">{slot.type}</span>
+									</div>
+
+									<div class="flex gap-2">
+										<div class="flex-1">
+											<label class="text-xs text-text-muted">Sets</label>
+											<input type="number" bind:value={editSlotSets} min="1" max="20"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+										<div class="flex-1">
+											<label class="text-xs text-text-muted">Reps</label>
+											<input type="number" bind:value={editSlotReps} min="1" max="100" placeholder="default"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+										<div class="flex-1">
+											<label class="text-xs text-text-muted">Rest (s)</label>
+											<input type="number" bind:value={editSlotRest} min="0" placeholder="default"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+									</div>
+
+									{#if profiles.length > 0}
+										<div>
+											<label class="text-xs text-text-muted">Weight profile</label>
+											<select
+												bind:value={editSlotProfileId}
+												class="w-full bg-dark-card text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
+											>
+												<option value="">None (use increments)</option>
+												{#each profiles as p}
+													<option value={p.id}>{p.name} ({p.weights[0]}–{p.weights[p.weights.length - 1]} kg)</option>
+												{/each}
+											</select>
+										</div>
+									{/if}
+
+									<div class="flex gap-2">
+										<div class="flex-1">
+											<label class="text-xs text-text-muted">Rep target</label>
+											<input type="number" bind:value={editSlotRepTarget} min="1" placeholder="{settings.defaultRepTarget}"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+										<div class="flex-1">
+											<label class="text-xs text-text-muted">Weight increments</label>
+											<input type="text" bind:value={editSlotWeightIncrements} placeholder="e.g. 1, 1.5, 2"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+									</div>
+
+									<div class="flex gap-2">
+										<div class="flex-1">
+											<label class="text-xs text-text-muted">Starting weight (kg)</label>
+											<input type="number" bind:value={editSlotInitialWeight} placeholder="0" step="0.5"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+										<div class="flex-1">
+											<label class="text-xs text-text-muted">Starting reps</label>
+											<input type="number" bind:value={editSlotInitialReps} placeholder="8"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+									</div>
+
+									<label class="flex items-center gap-2 text-xs text-text-secondary">
+										<input type="checkbox" bind:checked={editSlotUsePerSet} class="accent-accent" />
+										Per-set values (pyramid)
+									</label>
+
+									{#if editSlotUsePerSet}
+										<div class="space-y-2">
+											{#each editSlotInitialSets as set, i}
+												<div class="flex gap-2 items-center">
+													<span class="text-xs text-text-muted w-6">S{i + 1}</span>
+													<input type="number" bind:value={set.weight} placeholder="kg" step="0.5"
+														class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
+													<input type="number" bind:value={set.reps} placeholder="reps"
+														class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
+													<button onclick={() => { editSlotInitialSets = editSlotInitialSets.filter((_, j) => j !== i); }}
+														class="text-danger text-xs">×</button>
+												</div>
+											{/each}
+											<button
+												onclick={() => { editSlotInitialSets = [...editSlotInitialSets, { weight: editSlotInitialWeight ?? 0, reps: editSlotInitialReps ?? 8 }]; }}
+												class="text-accent text-xs"
+											>
+												+ Add set
+											</button>
+										</div>
+									{/if}
+
+									<div class="flex gap-2">
+										<button
+											onclick={saveEditSlot}
+											class="flex-1 bg-success hover:bg-green-600 text-white py-1.5 rounded text-sm font-medium transition-colors"
+										>
+											Save
+										</button>
+										<button
+											onclick={() => editingSlotId = null}
+											class="flex-1 bg-dark-card text-text-secondary py-1.5 rounded text-sm"
+										>
+											Cancel
+										</button>
+									</div>
+								</div>
+							{:else}
 							<div class="flex items-center gap-2 p-2 bg-dark-surface rounded-lg text-sm">
 								<span class="text-text-muted w-5 text-xs">{slotIndex + 1}.</span>
 								<div class="flex-1">
@@ -241,8 +400,10 @@
 										<div class="text-text-muted text-xs">Pyramid: {slot.initialSets.map(s => `${s.weight}kg×${s.reps}`).join(', ')}</div>
 									{/if}
 								</div>
+								<button onclick={() => startEditSlot(slot)} class="text-accent text-xs">Edit</button>
 								<button onclick={() => handleDeleteSlot(slot.id)} class="text-danger text-xs">×</button>
 							</div>
+							{/if}
 						{/each}
 					</div>
 				{/if}
