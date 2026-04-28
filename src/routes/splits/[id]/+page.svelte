@@ -319,12 +319,12 @@
 
 									<div class="flex gap-2">
 										<div class="flex-1">
-											<label class="text-xs text-text-muted">Starting weight (kg)</label>
+											<label class="text-xs text-text-muted">Current weight (kg)</label>
 											<input type="number" bind:value={editSlotInitialWeight} placeholder="0" step="0.5"
 												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 										</div>
 										<div class="flex-1">
-											<label class="text-xs text-text-muted">Starting reps</label>
+											<label class="text-xs text-text-muted">Current reps</label>
 											<input type="number" bind:value={editSlotInitialReps} placeholder="8"
 												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 										</div>
@@ -332,7 +332,7 @@
 
 									<label class="flex items-center gap-2 text-xs text-text-secondary">
 										<input type="checkbox" bind:checked={editSlotUsePerSet} class="accent-accent" />
-										Per-set values (pyramid)
+										Per-set current values
 									</label>
 
 									{#if editSlotUsePerSet}
@@ -393,11 +393,11 @@
 										{#if slot.restSeconds} · {slot.restSeconds}s rest{/if}
 										{#if slot.repTarget} · {slot.repTarget} rep target{/if}
 									</div>
-									{#if slot.initialWeight || slot.initialReps}
-										<div class="text-text-muted text-xs">Start: {slot.initialWeight ?? 0}kg × {slot.initialReps ?? '?'} reps</div>
+									{#if slot.initialWeight !== undefined || slot.initialReps !== undefined}
+										<div class="text-text-muted text-xs">Current: {slot.initialWeight ?? 0}kg × {slot.initialReps ?? '?'} reps</div>
 									{/if}
 									{#if slot.initialSets && slot.initialSets.length > 0}
-										<div class="text-text-muted text-xs">Pyramid: {slot.initialSets.map(s => `${s.weight}kg×${s.reps}`).join(', ')}</div>
+										<div class="text-text-muted text-xs">Current sets: {slot.initialSets.map(s => `${s.weight}kg×${s.reps}`).join(', ')}</div>
 									{/if}
 								</div>
 								<button onclick={() => startEditSlot(slot)} class="text-accent text-xs">Edit</button>
@@ -525,12 +525,12 @@
 						<!-- Initial Weight/Reps -->
 						<div class="flex gap-2">
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Starting weight (kg)</label>
+								<label class="text-xs text-text-muted">Current weight (kg)</label>
 								<input type="number" bind:value={newSlotInitialWeight} placeholder="0" step="0.5"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Starting reps</label>
+								<label class="text-xs text-text-muted">Current reps</label>
 								<input type="number" bind:value={newSlotInitialReps} placeholder="8"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
@@ -538,7 +538,7 @@
 
 						<label class="flex items-center gap-2 text-xs text-text-secondary">
 							<input type="checkbox" bind:checked={newSlotUsePerSet} class="accent-accent" />
-							Per-set values (pyramid)
+							Per-set current values
 						</label>
 
 						{#if newSlotUsePerSet}

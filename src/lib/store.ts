@@ -38,7 +38,7 @@ export async function initPresetExercises(): Promise<void> {
 	const groups = await db.muscleGroups.toArray();
 	const groupMap = new Map(groups.map(g => [g.name, g.id]));
 
-	const exercises: Exercise[] = PRESET_EXERCISES.map(preset => {
+	const exercises = PRESET_EXERCISES.map<Exercise | null>(preset => {
 		const mainGroupId = groupMap.get(preset.mainGroup);
 		if (!mainGroupId) return null;
 
@@ -57,7 +57,7 @@ export async function initPresetExercises(): Promise<void> {
 			isPreset: true,
 			createdAt: new Date().toISOString()
 		};
-	}).filter((e): e is Exercise => e !== null);
+	}).filter((exercise): exercise is Exercise => exercise !== null);
 
 	await db.exercises.bulkAdd(exercises);
 }
@@ -97,10 +97,10 @@ export async function updateIncrementProfile(id: string, updates: Partial<Omit<I
 }
 
 export async function deleteIncrementProfile(id: string): Promise<void> {
-	// Clear reference from any exercises using this profile
-	const exercises = await db.exercises.filter(e => e.incrementProfileId === id).toArray();
-	for (const ex of exercises) {
-		await db.exercises.update(ex.id, { incrementProfileId: undefined });
+	// Clear reference from any slots using this profile
+	const slots = await db.exerciseSlots.filter(slot => slot.incrementProfileId === id).toArray();
+	for (const slot of slots) {
+		await db.exerciseSlots.update(slot.id, { incrementProfileId: undefined });
 	}
 	await db.incrementProfiles.delete(id);
 }
@@ -297,7 +297,11 @@ export async function createExerciseLog(data: Omit<ExerciseLog, 'id' | 'startedA
 }
 
 export async function finishExerciseLog(id: string): Promise<void> {
+	const exerciseLog = await db.exerciseLogs.get(id);
 	await db.exerciseLogs.update(id, { finishedAt: new Date().toISOString() });
+	if (exerciseLog) {
+		await syncSlotCurrentValuesFromExerciseLog(exerciseLog);
+	}
 }
 
 // ─── Set Logs ───
@@ -314,6 +318,118 @@ export async function createSetLog(data: Omit<SetLog, 'id'>): Promise<SetLog> {
 
 export async function updateSetLog(id: string, updates: Partial<Omit<SetLog, 'id'>>): Promise<void> {
 	await db.setLogs.update(id, updates);
+}
+
+export interface PlannedExerciseSet {
+	setNumber: number;
+	targetWeight: number;
+	targetReps: number;
+}
+
+function getFallbackTargetReps(slot: ExerciseSlot, repTargetCeiling: number): number {
+	const fallback = slot.targetReps ?? repTargetCeiling - 4;
+	return fallback < 1 ? 1 : fallback;
+}
+
+export async function planExerciseTargets(
+	slot: ExerciseSlot,
+	exerciseId: string,
+	splitDayId: string,
+	splitDayRepTarget: number | undefined,
+	settings: Settings
+): Promise<PlannedExerciseSet[]> {
+	const exercise = await getExercise(exerciseId);
+	const repTargetCeiling = slot.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
+	const increment = settings.defaultWeightIncrement;
+
+	let profile: IncrementProfile | undefined;
+	if (slot.incrementProfileId) {
+		profile = await getIncrementProfile(slot.incrementProfileId);
+	}
+
+	const last = await getLastPerformance(exerciseId, splitDayId);
+	const plannedSets: PlannedExerciseSet[] = [];
+
+	if (last && last.sets.length > 0) {
+		const progression = calculateProgression(
+			last.sets,
+			repTargetCeiling,
+			increment,
+			slot.weightIncrements,
+			profile
+		);
+
+		for (let index = 0; index < slot.targetSets; index++) {
+			let targetWeight: number;
+			let targetReps: number;
+
+			if (index < progression.length) {
+				targetWeight = progression[index].suggestedWeight;
+				targetReps = progression[index].suggestedReps;
+			} else {
+				const lastProgression = progression[progression.length - 1];
+				targetWeight = lastProgression.suggestedWeight;
+				targetReps = lastProgression.suggestedReps;
+			}
+
+			if (exercise?.isBodyweight) targetWeight = 0;
+
+			plannedSets.push({
+				setNumber: index + 1,
+				targetWeight,
+				targetReps
+			});
+		}
+
+		return plannedSets;
+	}
+
+	for (let index = 0; index < slot.targetSets; index++) {
+		let targetWeight = 0;
+		let targetReps = getFallbackTargetReps(slot, repTargetCeiling);
+
+		if (slot.initialSets && slot.initialSets[index]) {
+			targetWeight = slot.initialSets[index].weight;
+			targetReps = slot.initialSets[index].reps;
+		} else if (slot.initialWeight !== undefined || slot.initialReps !== undefined) {
+			targetWeight = slot.initialWeight ?? 0;
+			targetReps = slot.initialReps ?? targetReps;
+		}
+
+		if (exercise?.isBodyweight) targetWeight = 0;
+
+		plannedSets.push({
+			setNumber: index + 1,
+			targetWeight,
+			targetReps
+		});
+	}
+
+	return plannedSets;
+}
+
+async function syncSlotCurrentValuesFromExerciseLog(exerciseLog: ExerciseLog): Promise<void> {
+	const slot = await db.exerciseSlots.get(exerciseLog.slotId);
+	if (!slot) return;
+
+	const completedSets = (await getSetLogs(exerciseLog.id)).filter(set => set.completed && !set.isWarmup);
+	if (completedSets.length === 0) return;
+
+	const normalizedSets = completedSets.map(set => ({
+		weight: set.actualWeight ?? set.targetWeight,
+		reps: set.actualReps ?? set.targetReps
+	}));
+	const latestSet = normalizedSets[normalizedSets.length - 1];
+	const updates: Partial<Omit<ExerciseSlot, 'id'>> = {
+		initialWeight: latestSet.weight,
+		initialReps: latestSet.reps
+	};
+
+	if (slot.initialSets && slot.initialSets.length > 0) {
+		updates.initialSets = normalizedSets;
+	}
+
+	await updateExerciseSlot(slot.id, updates);
 }
 
 // ─── Progression Logic ───

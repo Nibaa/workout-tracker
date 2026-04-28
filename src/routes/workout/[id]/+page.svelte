@@ -5,11 +5,11 @@
 	import {
 		getExerciseSlots, getExerciseLogs, getExercise, getSetLogs,
 		finishWorkoutSession, createExerciseLog, getAlternatingExerciseId,
-		getLastPerformance, calculateProgression, createSetLog, getSettings,
-		getAllExerciseIdsForSlot, getIncrementProfile, deleteWorkoutSession
+		createSetLog, getSettings, getAllExerciseIdsForSlot,
+		deleteWorkoutSession, planExerciseTargets, type PlannedExerciseSet
 	} from '$lib/store';
 	import { db } from '$lib/db';
-	import type { WorkoutSession, SplitDay, ExerciseSlot, ExerciseLog, SetLog, Exercise, Settings, IncrementProfile } from '$lib/types';
+	import type { WorkoutSession, SplitDay, ExerciseSlot, ExerciseLog, SetLog, Exercise, Settings } from '$lib/types';
 
 	let session = $state<WorkoutSession | undefined>();
 	let splitDay = $state<SplitDay | undefined>();
@@ -17,6 +17,7 @@
 		exercise?: Exercise;
 		alternateExercises?: Exercise[];
 		suggestedExerciseId?: string;
+		previewTargetsByExerciseId?: Record<string, PlannedExerciseSet[]>;
 		log?: ExerciseLog;
 		sets?: SetLog[];
 		done?: boolean;
@@ -59,6 +60,7 @@
 
 		slots = await Promise.all(rawSlots.map(async (slot) => {
 			const exercise = await getExercise(slot.exerciseId);
+			const allExerciseIds = getAllExerciseIdsForSlot(slot);
 			const altIds = getAllExerciseIdsForSlot(slot).slice(1);
 			const alternateExercises = (await Promise.all(altIds.map(id => getExercise(id)))).filter((e): e is Exercise => !!e);
 			let suggestedExerciseId = slot.exerciseId;
@@ -76,7 +78,16 @@
 				done = log.finishedAt != null;
 			}
 
-			return { ...slot, exercise, alternateExercises, suggestedExerciseId, log, sets, done };
+			const previewTargetsByExerciseId = !log && splitDay
+				? Object.fromEntries(await Promise.all(
+					allExerciseIds.map(async (exerciseId) => ([
+						exerciseId,
+						await planExerciseTargets(slot, exerciseId, splitDay.id, splitDay.defaultRepTarget, settings)
+					] as const))
+				))
+				: undefined;
+
+			return { ...slot, exercise, alternateExercises, suggestedExerciseId, previewTargetsByExerciseId, log, sets, done };
 		}));
 
 		loading = false;
@@ -94,83 +105,23 @@
 			order: nextOrder
 		});
 
-		// Create target sets based on progression
-		const last = await getLastPerformance(eid, session.splitDayId);
-		const exercise = await getExercise(eid);
-		// Rep target resolution: slot → split day → global
-		const splitDayRepTarget = splitDay?.defaultRepTarget;
-		const repTargetCeiling = slot.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
-		const increment = settings.defaultWeightIncrement;
+		const plannedSets = await planExerciseTargets(
+			slot,
+			eid,
+			session.splitDayId,
+			splitDay?.defaultRepTarget,
+			settings
+		);
 
-		// Load increment profile from slot
-		let profile: IncrementProfile | undefined;
-		if (slot.incrementProfileId) {
-			profile = await getIncrementProfile(slot.incrementProfileId);
-		}
-
-		if (last && last.sets.length > 0) {
-			// Per-set progression from previous session
-			const progression = calculateProgression(
-				last.sets,
-				repTargetCeiling,
-				increment,
-				slot.weightIncrements,
-				profile
-			);
-
-			for (let i = 0; i < slot.targetSets; i++) {
-				let targetWeight: number;
-				let targetReps: number;
-
-				if (i < progression.length) {
-					targetWeight = progression[i].suggestedWeight;
-					targetReps = progression[i].suggestedReps;
-				} else {
-					// Extra sets beyond previous — use last suggestion
-					const lastProg = progression[progression.length - 1];
-					targetWeight = lastProg.suggestedWeight;
-					targetReps = lastProg.suggestedReps;
-				}
-
-				if (exercise?.isBodyweight) targetWeight = 0;
-
-				await createSetLog({
-					exerciseLogId: log.id,
-					setNumber: i + 1,
-					targetWeight,
-					targetReps,
-					isWarmup: false,
-					completed: false
-				});
-			}
-		} else {
-			// No history — use initial values from slot
-			for (let i = 0; i < slot.targetSets; i++) {
-				let targetWeight = 0;
-				let targetReps = slot.targetReps ?? repTargetCeiling - 4;
-				if (targetReps < 1) targetReps = 1;
-
-				if (slot.initialSets && slot.initialSets[i]) {
-					// Per-set pyramid initial values
-					targetWeight = slot.initialSets[i].weight;
-					targetReps = slot.initialSets[i].reps;
-				} else if (slot.initialWeight !== undefined || slot.initialReps !== undefined) {
-					// Default initial values
-					targetWeight = slot.initialWeight ?? 0;
-					targetReps = slot.initialReps ?? targetReps;
-				}
-
-				if (exercise?.isBodyweight) targetWeight = 0;
-
-				await createSetLog({
-					exerciseLogId: log.id,
-					setNumber: i + 1,
-					targetWeight,
-					targetReps,
-					isWarmup: false,
-					completed: false
-				});
-			}
+		for (const plannedSet of plannedSets) {
+			await createSetLog({
+				exerciseLogId: log.id,
+				setNumber: plannedSet.setNumber,
+				targetWeight: plannedSet.targetWeight,
+				targetReps: plannedSet.targetReps,
+				isWarmup: false,
+				completed: false
+			});
 		}
 
 		goto(`/workout/${session.id}/exercise/${log.id}`);
@@ -210,6 +161,27 @@
 		if (slot.done) return 'border-success';
 		if (slot.log) return 'border-warning';
 		return 'border-dark-border';
+	}
+
+	function formatPlannedSetValue(plannedSet: PlannedExerciseSet): string {
+		return plannedSet.targetWeight > 0
+			? `${plannedSet.targetWeight}kg x ${plannedSet.targetReps}`
+			: `${plannedSet.targetReps} reps`;
+	}
+
+	function formatPlannedSetSummary(plannedSets: PlannedExerciseSet[]): string {
+		if (plannedSets.length === 0) return 'No target';
+		const [firstSet] = plannedSets;
+		const uniform = plannedSets.every(set =>
+			set.targetWeight === firstSet.targetWeight && set.targetReps === firstSet.targetReps
+		);
+
+		if (uniform) {
+			const summary = formatPlannedSetValue(firstSet);
+			return plannedSets.length > 1 ? `${summary} for ${plannedSets.length} sets` : summary;
+		}
+
+		return plannedSets.map(set => `S${set.setNumber} ${formatPlannedSetValue(set)}`).join(' · ');
 	}
 </script>
 
@@ -310,6 +282,29 @@
 						</button>
 					{:else}
 						<!-- Start exercise -->
+						{#if slot.previewTargetsByExerciseId}
+							<div class="space-y-1 mb-3">
+								{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
+									{#if slot.exercise && slot.previewTargetsByExerciseId[slot.exerciseId]}
+										<div class="text-xs {slot.suggestedExerciseId === slot.exerciseId ? 'text-accent' : 'text-text-muted'}">
+											{slot.exercise.name}: {formatPlannedSetSummary(slot.previewTargetsByExerciseId[slot.exerciseId])}
+										</div>
+									{/if}
+									{#each slot.alternateExercises as alt}
+										{#if slot.previewTargetsByExerciseId[alt.id]}
+											<div class="text-xs {slot.suggestedExerciseId === alt.id ? 'text-accent' : 'text-text-muted'}">
+												{alt.name}: {formatPlannedSetSummary(slot.previewTargetsByExerciseId[alt.id])}
+											</div>
+										{/if}
+									{/each}
+								{:else}
+									{@const preview = slot.previewTargetsByExerciseId[slot.suggestedExerciseId ?? slot.exerciseId]}
+									{#if preview}
+										<div class="text-xs text-text-muted">Target: {formatPlannedSetSummary(preview)}</div>
+									{/if}
+								{/if}
+							</div>
+						{/if}
 						<div class="flex gap-2 flex-wrap">
 							{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
 								<button
