@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { getSettings, saveSettings, exportAllData, importAllData, getIncrementProfiles, createIncrementProfile, updateIncrementProfile, deleteIncrementProfile } from '$lib/store';
 	import type { Settings, IncrementProfile } from '$lib/types';
+	import packageJson from '../../../package.json';
 
 	let settings = $state<Settings>(getSettings());
 	let exportData = $state('');
@@ -17,6 +18,7 @@
 	let editingProfileId = $state<string | null>(null);
 	let editProfileName = $state('');
 	let editProfileWeights = $state('');
+	const appVersion = packageJson.version;
 
 	onMount(async () => {
 		settings = getSettings();
@@ -98,7 +100,12 @@
 </script>
 
 <div class="max-w-lg mx-auto px-4 pt-6">
-	<h1 class="text-2xl font-bold mb-6">Settings</h1>
+	<div class="flex items-start justify-between gap-4 mb-6">
+		<h1 class="text-2xl font-bold">Settings</h1>
+		<span class="text-xs text-text-muted bg-dark-surface border border-dark-border rounded-full px-2.5 py-1">
+			v{appVersion}
+		</span>
+	</div>
 
 	<!-- Rest Timer -->
 	<div class="bg-dark-card rounded-xl p-4 mb-4">
