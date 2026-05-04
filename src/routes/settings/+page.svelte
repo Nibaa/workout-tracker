@@ -118,7 +118,7 @@
 			</div>
 
 			<div>
-				<label class="block text-sm text-text-secondary mb-1">Rep target for weight increase</label>
+				<label class="block text-sm text-text-secondary mb-1">Default rep goal</label>
 				<input
 					type="number"
 					bind:value={settings.defaultRepTarget}

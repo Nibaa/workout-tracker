@@ -326,9 +326,20 @@ export interface PlannedExerciseSet {
 	targetReps: number;
 }
 
-function getFallbackTargetReps(slot: ExerciseSlot, repTargetCeiling: number): number {
-	const fallback = slot.targetReps ?? repTargetCeiling - 4;
+function getFallbackTargetReps(slot: ExerciseSlot, repGoal: number): number {
+	const fallback = slot.targetReps ?? repGoal - 4;
 	return fallback < 1 ? 1 : fallback;
+}
+
+function getEffectivePreviousSessionTarget(lastSets: SetLog[], repGoal: number): number {
+	const storedTarget = lastSets[0]?.targetReps;
+	const highestActualReps = Math.max(...lastSets.map(set => set.actualReps ?? 0));
+
+	if (!storedTarget || storedTarget > repGoal) {
+		return highestActualReps;
+	}
+
+	return storedTarget;
 }
 
 export async function planExerciseTargets(
@@ -339,7 +350,7 @@ export async function planExerciseTargets(
 	settings: Settings
 ): Promise<PlannedExerciseSet[]> {
 	const exercise = await getExercise(exerciseId);
-	const repTargetCeiling = slot.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
+	const repGoal = slot.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
 	const increment = settings.defaultWeightIncrement;
 
 	let profile: IncrementProfile | undefined;
@@ -353,7 +364,7 @@ export async function planExerciseTargets(
 	if (last && last.sets.length > 0) {
 		const progression = calculateProgression(
 			last.sets,
-			repTargetCeiling,
+			repGoal,
 			increment,
 			slot.weightIncrements,
 			profile
@@ -386,7 +397,7 @@ export async function planExerciseTargets(
 
 	for (let index = 0; index < slot.targetSets; index++) {
 		let targetWeight = 0;
-		let targetReps = getFallbackTargetReps(slot, repTargetCeiling);
+		let targetReps = getFallbackTargetReps(slot, repGoal);
 
 		if (slot.initialSets && slot.initialSets[index]) {
 			targetWeight = slot.initialSets[index].weight;
@@ -475,7 +486,7 @@ export async function getLastPerformance(exerciseId: string, splitDayId: string)
  * Calculate suggested weight and reps for each set in the next workout.
  *
  * Logic:
- * 1. If ALL sets hit the rep target ceiling → increase weight, reset reps
+ * 1. If ALL sets hit the rep goal → increase weight, reset reps
  * 2. If all sets hit their previous target → next target = lowestActualReps + 1
  * 3. If any set missed the target → target stays the same
  * 4. "Going over": if some sets exceed the target, next = lowestActualReps + 1
@@ -484,7 +495,7 @@ export async function getLastPerformance(exerciseId: string, splitDayId: string)
  */
 export function calculateProgression(
 	lastSets: SetLog[],
-	repTargetCeiling: number,
+	repGoal: number,
 	weightIncrement: number,
 	customIncrements?: number[],
 	incrementProfile?: IncrementProfile
@@ -500,8 +511,8 @@ export function calculateProgression(
 
 	const lastWeight = completedSets[0].actualWeight ?? completedSets[0].targetWeight;
 	const lowestActualReps = Math.min(...completedSets.map(s => s.actualReps ?? 0));
-	const allHitCeiling = completedSets.every(s => (s.actualReps ?? 0) >= repTargetCeiling);
-	const previousTarget = completedSets[0].targetReps;
+	const allHitCeiling = completedSets.every(s => (s.actualReps ?? 0) >= repGoal);
+	const previousTarget = getEffectivePreviousSessionTarget(completedSets, repGoal);
 	const allHitTarget = completedSets.every(s => (s.actualReps ?? 0) >= previousTarget);
 
 	if (allHitCeiling) {
@@ -518,8 +529,8 @@ export function calculateProgression(
 			newWeight = lastWeight + weightIncrement;
 		}
 
-		// Reset reps: start fresh at a base level (ceiling - 4, minimum 1)
-		const resetReps = Math.max(1, repTargetCeiling - 4);
+		// Reset reps: start fresh at a base level (threshold - 4, minimum 1)
+		const resetReps = Math.max(1, repGoal - 4);
 		return lastSets.map(() => ({
 			suggestedWeight: newWeight,
 			suggestedReps: resetReps

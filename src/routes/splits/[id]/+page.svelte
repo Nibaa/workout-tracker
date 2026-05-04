@@ -243,18 +243,18 @@
 							<span class="text-text-muted text-xs">Day {day.order + 1}</span>
 						{/if}
 						{#if day.defaultRepTarget}
-							<span class="text-text-muted text-xs ml-1">· {day.defaultRepTarget} rep target</span>
+							<span class="text-text-muted text-xs ml-1">· {day.defaultRepTarget} rep goal</span>
 						{/if}
 					</div>
 					<div class="flex gap-2 items-center">
 						<button onclick={async () => {
-							const val = prompt('Default rep target for this day (empty = use global):', String(day.defaultRepTarget ?? ''));
+							const val = prompt('Default rep goal for this day (empty = use global):', String(day.defaultRepTarget ?? ''));
 							if (val !== null) {
 								const num = val.trim() ? parseInt(val) : undefined;
 								await updateSplitDay(day.id, { defaultRepTarget: num });
 								await loadData();
 							}
-						}} class="text-accent text-xs">Rep target</button>
+						}} class="text-accent text-xs">Rep goal</button>
 						<button onclick={() => handleDeleteDay(day.id)} class="text-danger text-xs">Delete</button>
 					</div>
 				</div>
@@ -306,7 +306,7 @@
 
 									<div class="flex gap-2">
 										<div class="flex-1">
-											<label class="text-xs text-text-muted">Rep target</label>
+											<label class="text-xs text-text-muted">Rep goal</label>
 											<input type="number" bind:value={editSlotRepTarget} min="1" placeholder="{settings.defaultRepTarget}"
 												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 										</div>
@@ -391,7 +391,7 @@
 										{#if slot.targetReps} · {slot.targetReps} reps{/if}
 										{#if slot.type !== 'core'} · <span class="capitalize">{slot.type}</span>{/if}
 										{#if slot.restSeconds} · {slot.restSeconds}s rest{/if}
-										{#if slot.repTarget} · {slot.repTarget} rep target{/if}
+										{#if slot.repTarget} · {slot.repTarget} rep goal{/if}
 									</div>
 									{#if slot.initialWeight !== undefined || slot.initialReps !== undefined}
 										<div class="text-text-muted text-xs">Current: {slot.initialWeight ?? 0}kg × {slot.initialReps ?? '?'} reps</div>
@@ -511,7 +511,7 @@
 
 						<div class="flex gap-2">
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Rep target (override)</label>
+								<label class="text-xs text-text-muted">Rep goal</label>
 								<input type="number" bind:value={newSlotRepTarget} min="1" placeholder="{settings.defaultRepTarget}"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
@@ -610,7 +610,7 @@
 					</select>
 				{/if}
 				<div class="mb-3">
-					<label class="text-xs text-text-muted">Default rep target (optional, overrides global)</label>
+					<label class="text-xs text-text-muted">Default rep goal (optional, overrides global)</label>
 					<input type="number" bind:value={newDayRepTarget} min="1" max="100" placeholder="Use global default"
 						class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border" />
 				</div>

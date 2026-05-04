@@ -300,7 +300,7 @@
 								{:else}
 									{@const preview = slot.previewTargetsByExerciseId[slot.suggestedExerciseId ?? slot.exerciseId]}
 									{#if preview}
-										<div class="text-xs text-text-muted">Target: {formatPlannedSetSummary(preview)}</div>
+										<div class="text-xs text-text-muted">Session target: {formatPlannedSetSummary(preview)}</div>
 									{/if}
 								{/if}
 							</div>

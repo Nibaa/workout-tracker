@@ -15,7 +15,7 @@ export interface SplitDay {
 	name: string;
 	weekday?: Weekday;
 	order: number;
-	/** Default rep target for exercises in this split day (overrides global, overridden by exercise-level) */
+	/** Default rep goal for exercises in this split day */
 	defaultRepTarget?: number;
 }
 
@@ -58,13 +58,14 @@ export interface ExerciseSlot {
 	/** Superset group key — slots sharing the same key are done together */
 	supersetGroup?: string;
 	targetSets: number;
+	/** Session target reps used when there is no recent workout history */
 	targetReps?: number;
 	restSeconds?: number;
 	/** Custom weight increments for this slot (e.g., [1, 1.5, 2, 2.5]) */
 	weightIncrements?: number[];
 	/** Reference to an increment profile for available weights */
 	incrementProfileId?: string;
-	/** Rep target ceiling for weight progression. When all sets hit this, suggest weight increase */
+	/** Rep goal. When all sets hit this, suggest a weight increase next time */
 	repTarget?: number;
 	/** Initial weight (kg) when starting with no history */
 	initialWeight?: number;

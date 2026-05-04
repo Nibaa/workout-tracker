@@ -2,7 +2,10 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getSetLogs, updateSetLog, finishExerciseLog, getExercise, getSettings, getIncrementProfile, getNextWeightInProfile, getPrevWeightInProfile } from '$lib/store';
+	import {
+		getSetLogs, updateSetLog, finishExerciseLog, getExercise, getSettings,
+		getIncrementProfile, getNextWeightInProfile, getPrevWeightInProfile, getLastPerformance
+	} from '$lib/store';
 	import { db } from '$lib/db';
 	import type { ExerciseLog, SetLog, Exercise, ExerciseSlot, Settings, IncrementProfile } from '$lib/types';
 
@@ -14,6 +17,9 @@
 	let loading = $state(true);
 	let settings = $state<Settings>(getSettings());
 	let profile = $state<IncrementProfile | undefined>();
+	let previousPerformance = $state<{ weight: number; reps: number; sets: SetLog[] } | null>(null);
+	let showTargetAdjustmentPrompt = $state(false);
+	let adjustedTargetReps = $state<number | undefined>();
 
 	// Rest timer
 	let restActive = $state(false);
@@ -48,6 +54,7 @@
 		loading = true;
 		exerciseLog = await db.exerciseLogs.get(logId);
 		if (!exerciseLog) { goto(`/workout/${sessionId}`); return; }
+		const workoutSession = await db.workoutSessions.get(sessionId);
 
 		exercise = await getExercise(exerciseLog.exerciseId);
 		// Load slot for weight profile and increments
@@ -58,6 +65,9 @@
 			profile = await getIncrementProfile(slot.incrementProfileId);
 		}
 		sets = await getSetLogs(logId);
+		if (workoutSession) {
+			previousPerformance = await getLastPerformance(exerciseLog.exerciseId, workoutSession.splitDayId);
+		}
 
 		// Find first incomplete set
 		const firstIncomplete = sets.findIndex(s => !s.completed);
@@ -114,10 +124,70 @@
 		restRemaining = 0;
 	}
 
-	async function finishExercise() {
+	function getCompletedWorkingSets(): SetLog[] {
+		return sets.filter(set => set.completed && !set.isWarmup);
+	}
+
+	function hasPerformanceDrop(): boolean {
+		if (!previousPerformance || previousPerformance.sets.length === 0) return false;
+		const previousSets = previousPerformance.sets;
+		const currentSets = getCompletedWorkingSets();
+		const comparableSetCount = Math.min(previousSets.length, currentSets.length);
+
+		for (let index = 0; index < comparableSetCount; index++) {
+			const previousReps = previousSets[index].actualReps ?? previousSets[index].targetReps;
+			const currentReps = currentSets[index].actualReps ?? currentSets[index].targetReps;
+			if (currentReps < previousReps) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	function getSuggestedAdjustedTargetReps(): number {
+		const completedSets = getCompletedWorkingSets();
+		if (completedSets.length === 0) return 1;
+		return Math.max(1, ...completedSets.map(set => set.actualReps ?? set.targetReps));
+	}
+
+	async function persistAdjustedSessionTarget(newTargetReps: number) {
+		for (const set of sets) {
+			await updateSetLog(set.id, { targetReps: newTargetReps });
+		}
+
+		sets = sets.map(set => ({
+			...set,
+			targetReps: newTargetReps
+		}));
+	}
+
+	async function finalizeExercise() {
 		if (!exerciseLog) return;
 		await finishExerciseLog(exerciseLog.id);
 		goto(`/workout/${sessionId}`);
+	}
+
+	async function finishExercise() {
+		if (!exerciseLog) return;
+		if (allDone && hasPerformanceDrop()) {
+			adjustedTargetReps = getSuggestedAdjustedTargetReps();
+			showTargetAdjustmentPrompt = true;
+			return;
+		}
+		await finalizeExercise();
+	}
+
+	async function keepCurrentSessionTarget() {
+		showTargetAdjustmentPrompt = false;
+		await finalizeExercise();
+	}
+
+	async function applyAdjustedSessionTarget() {
+		if (adjustedTargetReps === undefined || adjustedTargetReps < 1) return;
+		await persistAdjustedSessionTarget(adjustedTargetReps);
+		showTargetAdjustmentPrompt = false;
+		await finalizeExercise();
 	}
 
 	function formatTime(seconds: number): string {
@@ -156,6 +226,39 @@
 				{allDone ? 'Done' : 'End Early'}
 			</button>
 		</div>
+
+		{#if showTargetAdjustmentPrompt}
+			<div class="bg-dark-card rounded-xl p-4 mb-4 border border-warning">
+				<p class="text-sm font-medium mb-2">Performance dipped compared with your last workout.</p>
+				<p class="text-xs text-text-secondary mb-3">
+					Keep the current session target for next time, or reset it to a new default.
+				</p>
+				<div class="mb-3">
+					<label class="block text-xs text-text-secondary mb-2">New session target reps</label>
+					<input
+						type="number"
+						bind:value={adjustedTargetReps}
+						min="1"
+						class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
+					/>
+					<p class="text-xs text-text-muted mt-1">Suggested reset: {getSuggestedAdjustedTargetReps()} reps</p>
+				</div>
+				<div class="flex gap-2">
+					<button
+						onclick={keepCurrentSessionTarget}
+						class="flex-1 bg-dark-surface text-text-secondary py-2 rounded-lg text-sm font-medium"
+					>
+						Keep current session target
+					</button>
+					<button
+						onclick={applyAdjustedSessionTarget}
+						class="flex-1 bg-warning hover:bg-yellow-600 text-white py-2 rounded-lg text-sm font-medium transition-colors"
+					>
+						Use new session target
+					</button>
+				</div>
+			</div>
+		{/if}
 
 		<!-- Rest Timer Overlay -->
 		{#if restActive}
@@ -236,7 +339,7 @@
 							>+</button>
 						</div>
 						{#if currentSet.targetWeight > 0}
-							<p class="text-xs text-text-muted text-center mt-1">Target: {currentSet.targetWeight}kg</p>
+							<p class="text-xs text-text-muted text-center mt-1">Session target: {currentSet.targetWeight}kg</p>
 						{/if}
 					</div>
 				{/if}
@@ -261,7 +364,7 @@
 							class="w-12 h-12 bg-dark-surface rounded-lg text-xl font-bold text-text-secondary hover:text-text-primary transition-colors"
 						>+</button>
 					</div>
-					<p class="text-xs text-text-muted text-center mt-1">Target: {currentSet.targetReps} reps</p>
+					<p class="text-xs text-text-muted text-center mt-1">Session target: {currentSet.targetReps} reps</p>
 				</div>
 
 				<button
@@ -291,7 +394,7 @@
 					{#if !set.completed && i > currentSetIndex}
 						<div class="flex items-center gap-3 p-2 text-text-muted text-xs">
 							<span class="w-6">○</span>
-							<span>Set {set.setNumber}: {set.targetWeight}kg × {set.targetReps} reps</span>
+							<span>Set {set.setNumber}: session target {set.targetWeight}kg × {set.targetReps} reps</span>
 						</div>
 					{/if}
 				{/each}
