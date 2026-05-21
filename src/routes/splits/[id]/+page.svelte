@@ -6,14 +6,15 @@
 		getSplit, updateSplit, deleteSplit, getSplitDays, createSplitDay, updateSplitDay,
 		deleteSplitDay, getExerciseSlots, createExerciseSlot, updateExerciseSlot,
 		deleteExerciseSlot, getExercises, getMuscleGroups, getAllExerciseIdsForSlot,
-		getIncrementProfiles, getSettings
+		getIncrementProfiles, getSettings, getExerciseInitialStateForSlot
 	} from '$lib/store';
 	import type {
-		Split, SplitDay, ExerciseSlot, Exercise, MuscleGroup, ExerciseSlotType, IncrementProfile, Settings
+		Split, SplitDay, ExerciseSlot, Exercise, MuscleGroup, ExerciseSlotType, IncrementProfile,
+		Settings, ExerciseSlotExerciseState
 	} from '$lib/types';
 	import { WEEKDAYS, WEEKDAY_LABELS, type Weekday } from '$lib/types';
 
-	const splitId = $derived($page.params.id);
+	const splitId = $derived($page.params.id ?? '');
 
 	let split = $state<Split | undefined>();
 	let days = $state<Array<SplitDay & { slots: Array<ExerciseSlot & { exercise?: Exercise; alternateExercises?: Exercise[] }> }>>([]);
@@ -57,6 +58,12 @@
 	let editSlotInitialReps = $state<number | undefined>();
 	let editSlotUsePerSet = $state(false);
 	let editSlotInitialSets = $state<Array<{ weight: number; reps: number }>>([]);
+	let editSlotExerciseStates = $state<Record<string, {
+		initialWeight?: number;
+		initialReps?: number;
+		usePerSet: boolean;
+		initialSets: Array<{ weight: number; reps: number }>;
+	}>>({});
 
 	// Edit name
 	let editingName = $state(false);
@@ -72,6 +79,7 @@
 
 	async function loadData() {
 		loading = true;
+		if (!splitId) { goto('/splits'); return; }
 		split = await getSplit(splitId);
 		if (!split) { goto('/splits'); return; }
 		editName = split.name;
@@ -104,7 +112,7 @@
 	}
 
 	async function handleAddDay() {
-		if (!newDayName.trim()) return;
+		if (!newDayName.trim() || !splitId) return;
 		const order = days.length;
 		await createSplitDay(splitId, newDayName.trim(), order, split?.type === 'weekday' ? newDayWeekday : undefined, newDayRepTarget);
 		newDayName = '';
@@ -179,25 +187,45 @@
 		editSlotInitialReps = slot.initialReps;
 		editSlotUsePerSet = !!slot.initialSets && slot.initialSets.length > 0;
 		editSlotInitialSets = slot.initialSets ? [...slot.initialSets] : [];
+		editSlotExerciseStates = Object.fromEntries(getAllExerciseIdsForSlot(slot).map((exerciseId) => {
+			const initialState = getExerciseInitialStateForSlot(slot, exerciseId);
+			return [exerciseId, createExerciseInitialStateDraft(initialState)];
+		}));
 	}
 
 	async function saveEditSlot() {
 		if (!editingSlotId) return;
+		const slot = days.flatMap(day => day.slots).find(candidate => candidate.id === editingSlotId);
+		if (!slot) return;
 		const increments = editSlotWeightIncrements
 			? editSlotWeightIncrements.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
 			: undefined;
-
-		await updateExerciseSlot(editingSlotId, {
+		const updates: Partial<Omit<ExerciseSlot, 'id'>> = {
 			targetSets: editSlotSets,
 			targetReps: editSlotReps,
 			restSeconds: editSlotRest,
 			incrementProfileId: editSlotProfileId || undefined,
 			weightIncrements: increments?.length ? increments : undefined,
-			repTarget: editSlotRepTarget,
-			initialWeight: editSlotInitialWeight,
-			initialReps: editSlotInitialReps,
-			initialSets: editSlotUsePerSet && editSlotInitialSets.length > 0 ? editSlotInitialSets : undefined
-		});
+			repTarget: editSlotRepTarget
+		};
+
+		if (slot.type === 'alternating' && getAllExerciseIdsForSlot(slot).length > 1) {
+			const primaryState = editSlotExerciseStates[slot.exerciseId] ?? createExerciseInitialStateDraft();
+			updates.initialWeight = primaryState.initialWeight;
+			updates.initialReps = primaryState.initialReps;
+			updates.initialSets = primaryState.usePerSet && primaryState.initialSets.length > 0
+				? primaryState.initialSets.map(set => ({ ...set }))
+				: undefined;
+			updates.exerciseInitialStatesById = serializeExerciseInitialStates(editSlotExerciseStates);
+		} else {
+			updates.initialWeight = editSlotInitialWeight;
+			updates.initialReps = editSlotInitialReps;
+			updates.initialSets = editSlotUsePerSet && editSlotInitialSets.length > 0
+				? editSlotInitialSets
+				: undefined;
+		}
+
+		await updateExerciseSlot(editingSlotId, updates);
 
 		editingSlotId = null;
 		await loadData();
@@ -205,6 +233,73 @@
 
 	function getExercisesByGroup(groupId: string): Exercise[] {
 		return allExercises.filter(e => e.muscleGroupId === groupId);
+	}
+
+	function createExerciseInitialStateDraft(initialState?: ExerciseSlotExerciseState): {
+		initialWeight?: number;
+		initialReps?: number;
+		usePerSet: boolean;
+		initialSets: Array<{ weight: number; reps: number }>;
+	} {
+		return {
+			initialWeight: initialState?.initialWeight,
+			initialReps: initialState?.initialReps,
+			usePerSet: !!initialState?.initialSets?.length,
+			initialSets: initialState?.initialSets?.map(set => ({ ...set })) ?? []
+		};
+	}
+
+	function serializeExerciseInitialStates(
+		exerciseStates: typeof editSlotExerciseStates
+	): Record<string, ExerciseSlotExerciseState> | undefined {
+		const entries = Object.entries(exerciseStates)
+			.map(([exerciseId, exerciseState]) => {
+				const initialSets = exerciseState.usePerSet && exerciseState.initialSets.length > 0
+					? exerciseState.initialSets.map(set => ({ ...set }))
+					: undefined;
+				const hasState = exerciseState.initialWeight !== undefined
+					|| exerciseState.initialReps !== undefined
+					|| !!initialSets;
+
+				if (!hasState) return null;
+
+				return [exerciseId, {
+					initialWeight: exerciseState.initialWeight,
+					initialReps: exerciseState.initialReps,
+					initialSets
+				}] as const;
+			})
+			.filter((entry): entry is readonly [string, ExerciseSlotExerciseState] => entry !== null);
+
+		return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+	}
+
+	function addEditExerciseInitialSet(exerciseId: string) {
+		const exerciseState = editSlotExerciseStates[exerciseId];
+		if (!exerciseState) return;
+		exerciseState.initialSets = [
+			...exerciseState.initialSets,
+			{ weight: exerciseState.initialWeight ?? 0, reps: exerciseState.initialReps ?? 8 }
+		];
+	}
+
+	function removeEditExerciseInitialSet(exerciseId: string, setIndex: number) {
+		const exerciseState = editSlotExerciseStates[exerciseId];
+		if (!exerciseState) return;
+		exerciseState.initialSets = exerciseState.initialSets.filter((_, index) => index !== setIndex);
+	}
+
+	function getExerciseCurrentSummary(slot: ExerciseSlot, exerciseId: string): string | null {
+		const initialState = getExerciseInitialStateForSlot(slot, exerciseId);
+		if (initialState.initialSets && initialState.initialSets.length > 0) {
+			return `Current sets: ${initialState.initialSets.map(set => `${set.weight}kg×${set.reps}`).join(', ')}`;
+		}
+
+		if (initialState.initialWeight !== undefined || initialState.initialReps !== undefined) {
+			return `Current: ${initialState.initialWeight ?? 0}kg × ${initialState.initialReps ?? '?'} reps`;
+		}
+
+		return null;
 	}
 </script>
 
@@ -307,7 +402,7 @@
 									<div class="flex gap-2">
 										<div class="flex-1">
 											<label class="text-xs text-text-muted">Rep goal</label>
-											<input type="number" bind:value={editSlotRepTarget} min="1" placeholder="{settings.defaultRepTarget}"
+											<input type="number" bind:value={editSlotRepTarget} min="1" placeholder={String(settings.defaultRepTarget)}
 												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 										</div>
 										<div class="flex-1">
@@ -317,44 +412,132 @@
 										</div>
 									</div>
 
-									<div class="flex gap-2">
-										<div class="flex-1">
-											<label class="text-xs text-text-muted">Current weight (kg)</label>
-											<input type="number" bind:value={editSlotInitialWeight} placeholder="0" step="0.5"
-												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
-										</div>
-										<div class="flex-1">
-											<label class="text-xs text-text-muted">Current reps</label>
-											<input type="number" bind:value={editSlotInitialReps} placeholder="8"
-												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
-										</div>
-									</div>
-
-									<label class="flex items-center gap-2 text-xs text-text-secondary">
-										<input type="checkbox" bind:checked={editSlotUsePerSet} class="accent-accent" />
-										Per-set current values
-									</label>
-
-									{#if editSlotUsePerSet}
-										<div class="space-y-2">
-											{#each editSlotInitialSets as set, i}
-												<div class="flex gap-2 items-center">
-													<span class="text-xs text-text-muted w-6">S{i + 1}</span>
-													<input type="number" bind:value={set.weight} placeholder="kg" step="0.5"
-														class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
-													<input type="number" bind:value={set.reps} placeholder="reps"
-														class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
-													<button onclick={() => { editSlotInitialSets = editSlotInitialSets.filter((_, j) => j !== i); }}
-														class="text-danger text-xs">×</button>
+									{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
+										<div class="space-y-3">
+											<p class="text-xs text-text-muted">Current values</p>
+											{#if slot.exercise && editSlotExerciseStates[slot.exerciseId]}
+												{@const primaryState = editSlotExerciseStates[slot.exerciseId]}
+												<div class="rounded-lg border border-dark-border p-3 space-y-2">
+													<p class="text-sm font-medium">{slot.exercise.name}</p>
+													<div class="flex gap-2">
+														<div class="flex-1">
+															<label class="text-xs text-text-muted">Current weight (kg)</label>
+															<input type="number" bind:value={primaryState.initialWeight} placeholder="0" step="0.5"
+																class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+														</div>
+														<div class="flex-1">
+															<label class="text-xs text-text-muted">Current reps</label>
+															<input type="number" bind:value={primaryState.initialReps} placeholder="8"
+																class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+														</div>
+													</div>
+													<label class="flex items-center gap-2 text-xs text-text-secondary">
+														<input type="checkbox" bind:checked={primaryState.usePerSet} class="accent-accent" />
+														Per-set current values
+													</label>
+													{#if primaryState.usePerSet}
+														<div class="space-y-2">
+															{#each primaryState.initialSets as set, i}
+																<div class="flex gap-2 items-center">
+																	<span class="text-xs text-text-muted w-6">S{i + 1}</span>
+																	<input type="number" bind:value={set.weight} placeholder="kg" step="0.5"
+																		class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
+																	<input type="number" bind:value={set.reps} placeholder="reps"
+																		class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
+																	<button onclick={() => removeEditExerciseInitialSet(slot.exerciseId, i)}
+																		class="text-danger text-xs">×</button>
+																</div>
+															{/each}
+															<button onclick={() => addEditExerciseInitialSet(slot.exerciseId)} class="text-accent text-xs">
+																+ Add set
+															</button>
+														</div>
+													{/if}
 												</div>
+											{/if}
+											{#each slot.alternateExercises as alt}
+												{#if editSlotExerciseStates[alt.id]}
+													{@const alternateState = editSlotExerciseStates[alt.id]}
+													<div class="rounded-lg border border-dark-border p-3 space-y-2">
+														<p class="text-sm font-medium">{alt.name}</p>
+														<div class="flex gap-2">
+															<div class="flex-1">
+																<label class="text-xs text-text-muted">Current weight (kg)</label>
+																<input type="number" bind:value={alternateState.initialWeight} placeholder="0" step="0.5"
+																	class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+															</div>
+															<div class="flex-1">
+																<label class="text-xs text-text-muted">Current reps</label>
+																<input type="number" bind:value={alternateState.initialReps} placeholder="8"
+																	class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+															</div>
+														</div>
+														<label class="flex items-center gap-2 text-xs text-text-secondary">
+															<input type="checkbox" bind:checked={alternateState.usePerSet} class="accent-accent" />
+															Per-set current values
+														</label>
+														{#if alternateState.usePerSet}
+															<div class="space-y-2">
+																{#each alternateState.initialSets as set, i}
+																	<div class="flex gap-2 items-center">
+																		<span class="text-xs text-text-muted w-6">S{i + 1}</span>
+																		<input type="number" bind:value={set.weight} placeholder="kg" step="0.5"
+																			class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
+																		<input type="number" bind:value={set.reps} placeholder="reps"
+																			class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
+																		<button onclick={() => removeEditExerciseInitialSet(alt.id, i)}
+																			class="text-danger text-xs">×</button>
+																	</div>
+																{/each}
+																<button onclick={() => addEditExerciseInitialSet(alt.id)} class="text-accent text-xs">
+																	+ Add set
+																</button>
+															</div>
+														{/if}
+													</div>
+												{/if}
 											{/each}
-											<button
-												onclick={() => { editSlotInitialSets = [...editSlotInitialSets, { weight: editSlotInitialWeight ?? 0, reps: editSlotInitialReps ?? 8 }]; }}
-												class="text-accent text-xs"
-											>
-												+ Add set
-											</button>
 										</div>
+									{:else}
+										<div class="flex gap-2">
+											<div class="flex-1">
+												<label class="text-xs text-text-muted">Current weight (kg)</label>
+												<input type="number" bind:value={editSlotInitialWeight} placeholder="0" step="0.5"
+													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+											</div>
+											<div class="flex-1">
+												<label class="text-xs text-text-muted">Current reps</label>
+												<input type="number" bind:value={editSlotInitialReps} placeholder="8"
+													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+											</div>
+										</div>
+
+										<label class="flex items-center gap-2 text-xs text-text-secondary">
+											<input type="checkbox" bind:checked={editSlotUsePerSet} class="accent-accent" />
+											Per-set current values
+										</label>
+
+										{#if editSlotUsePerSet}
+											<div class="space-y-2">
+												{#each editSlotInitialSets as set, i}
+													<div class="flex gap-2 items-center">
+														<span class="text-xs text-text-muted w-6">S{i + 1}</span>
+														<input type="number" bind:value={set.weight} placeholder="kg" step="0.5"
+															class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
+														<input type="number" bind:value={set.reps} placeholder="reps"
+															class="flex-1 bg-dark-card px-2 py-1 rounded border border-dark-border text-sm" />
+														<button onclick={() => { editSlotInitialSets = editSlotInitialSets.filter((_, j) => j !== i); }}
+															class="text-danger text-xs">×</button>
+													</div>
+												{/each}
+												<button
+													onclick={() => { editSlotInitialSets = [...editSlotInitialSets, { weight: editSlotInitialWeight ?? 0, reps: editSlotInitialReps ?? 8 }]; }}
+													class="text-accent text-xs"
+												>
+													+ Add set
+												</button>
+											</div>
+										{/if}
 									{/if}
 
 									<div class="flex gap-2">
@@ -393,11 +576,26 @@
 										{#if slot.restSeconds} · {slot.restSeconds}s rest{/if}
 										{#if slot.repTarget} · {slot.repTarget} rep goal{/if}
 									</div>
-									{#if slot.initialWeight !== undefined || slot.initialReps !== undefined}
-										<div class="text-text-muted text-xs">Current: {slot.initialWeight ?? 0}kg × {slot.initialReps ?? '?'} reps</div>
-									{/if}
-									{#if slot.initialSets && slot.initialSets.length > 0}
-										<div class="text-text-muted text-xs">Current sets: {slot.initialSets.map(s => `${s.weight}kg×${s.reps}`).join(', ')}</div>
+									{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
+										{#if slot.exercise}
+											{@const primarySummary = getExerciseCurrentSummary(slot, slot.exerciseId)}
+											{#if primarySummary}
+												<div class="text-text-muted text-xs">{slot.exercise.name}: {primarySummary}</div>
+											{/if}
+										{/if}
+										{#each slot.alternateExercises as alt}
+											{@const alternateSummary = getExerciseCurrentSummary(slot, alt.id)}
+											{#if alternateSummary}
+												<div class="text-text-muted text-xs">{alt.name}: {alternateSummary}</div>
+											{/if}
+										{/each}
+									{:else}
+										{#if slot.initialWeight !== undefined || slot.initialReps !== undefined}
+											<div class="text-text-muted text-xs">Current: {slot.initialWeight ?? 0}kg × {slot.initialReps ?? '?'} reps</div>
+										{/if}
+										{#if slot.initialSets && slot.initialSets.length > 0}
+											<div class="text-text-muted text-xs">Current sets: {slot.initialSets.map(s => `${s.weight}kg×${s.reps}`).join(', ')}</div>
+										{/if}
 									{/if}
 								</div>
 								<button onclick={() => startEditSlot(slot)} class="text-accent text-xs">Edit</button>
@@ -512,7 +710,7 @@
 						<div class="flex gap-2">
 							<div class="flex-1">
 								<label class="text-xs text-text-muted">Rep goal</label>
-								<input type="number" bind:value={newSlotRepTarget} min="1" placeholder="{settings.defaultRepTarget}"
+								<input type="number" bind:value={newSlotRepTarget} min="1" placeholder={String(settings.defaultRepTarget)}
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 							<div class="flex-1">

@@ -44,6 +44,12 @@ export interface Exercise {
 	createdAt: string;
 }
 
+export interface ExerciseSlotExerciseState {
+	initialWeight?: number;
+	initialReps?: number;
+	initialSets?: Array<{ weight: number; reps: number }>;
+}
+
 export interface ExerciseSlot {
 	id: string;
 	splitDayId: string;
@@ -73,6 +79,8 @@ export interface ExerciseSlot {
 	initialReps?: number;
 	/** Per-set initial values for pyramid/varying setups */
 	initialSets?: Array<{ weight: number; reps: number }>;
+	/** Per-exercise initial values for alternating slots */
+	exerciseInitialStatesById?: Record<string, ExerciseSlotExerciseState>;
 }
 
 export interface WorkoutSession {

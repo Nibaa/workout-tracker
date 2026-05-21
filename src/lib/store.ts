@@ -4,7 +4,7 @@ import {
 	DEFAULT_SETTINGS, DEFAULT_MUSCLE_GROUPS, PRESET_EXERCISES,
 	type Split, type SplitDay, type Exercise, type ExerciseSlot,
 	type WorkoutSession, type ExerciseLog, type SetLog, type Settings, type MuscleGroup, type Weekday,
-	type IncrementProfile, type WorkoutBreak, type BreakReason
+	type IncrementProfile, type WorkoutBreak, type BreakReason, type ExerciseSlotExerciseState
 } from '$lib/types';
 
 // ─── Settings ───
@@ -342,6 +342,26 @@ function getEffectivePreviousSessionTarget(lastSets: SetLog[], repGoal: number):
 	return storedTarget;
 }
 
+export function getExerciseInitialStateForSlot(
+	slot: ExerciseSlot,
+	exerciseId: string
+): ExerciseSlotExerciseState {
+	const exerciseInitialState = slot.exerciseInitialStatesById?.[exerciseId];
+	if (exerciseInitialState) {
+		return {
+			initialWeight: exerciseInitialState.initialWeight,
+			initialReps: exerciseInitialState.initialReps,
+			initialSets: exerciseInitialState.initialSets?.map(set => ({ ...set }))
+		};
+	}
+
+	return {
+		initialWeight: slot.initialWeight,
+		initialReps: slot.initialReps,
+		initialSets: slot.initialSets?.map(set => ({ ...set }))
+	};
+}
+
 export async function planExerciseTargets(
 	slot: ExerciseSlot,
 	exerciseId: string,
@@ -360,6 +380,7 @@ export async function planExerciseTargets(
 
 	const last = await getLastPerformance(exerciseId, splitDayId);
 	const plannedSets: PlannedExerciseSet[] = [];
+	const initialState = getExerciseInitialStateForSlot(slot, exerciseId);
 
 	if (last && last.sets.length > 0) {
 		const progression = calculateProgression(
@@ -399,12 +420,12 @@ export async function planExerciseTargets(
 		let targetWeight = 0;
 		let targetReps = getFallbackTargetReps(slot, repGoal);
 
-		if (slot.initialSets && slot.initialSets[index]) {
-			targetWeight = slot.initialSets[index].weight;
-			targetReps = slot.initialSets[index].reps;
-		} else if (slot.initialWeight !== undefined || slot.initialReps !== undefined) {
-			targetWeight = slot.initialWeight ?? 0;
-			targetReps = slot.initialReps ?? targetReps;
+		if (initialState.initialSets && initialState.initialSets[index]) {
+			targetWeight = initialState.initialSets[index].weight;
+			targetReps = initialState.initialSets[index].reps;
+		} else if (initialState.initialWeight !== undefined || initialState.initialReps !== undefined) {
+			targetWeight = initialState.initialWeight ?? 0;
+			targetReps = initialState.initialReps ?? targetReps;
 		}
 
 		if (exercise?.isBodyweight) targetWeight = 0;
@@ -431,9 +452,19 @@ async function syncSlotCurrentValuesFromExerciseLog(exerciseLog: ExerciseLog): P
 		reps: set.actualReps ?? set.targetReps
 	}));
 	const latestSet = normalizedSets[normalizedSets.length - 1];
+	const previousExerciseState = slot.exerciseInitialStatesById?.[exerciseLog.exerciseId];
+	const shouldStorePerSet = Boolean(previousExerciseState?.initialSets?.length || slot.initialSets?.length);
 	const updates: Partial<Omit<ExerciseSlot, 'id'>> = {
 		initialWeight: latestSet.weight,
-		initialReps: latestSet.reps
+		initialReps: latestSet.reps,
+		exerciseInitialStatesById: {
+			...(slot.exerciseInitialStatesById ?? {}),
+			[exerciseLog.exerciseId]: {
+				initialWeight: latestSet.weight,
+				initialReps: latestSet.reps,
+				initialSets: shouldStorePerSet ? normalizedSets : undefined
+			}
+		}
 	};
 
 	if (slot.initialSets && slot.initialSets.length > 0) {
