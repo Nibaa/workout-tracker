@@ -1,7 +1,7 @@
 {
 	"name": "workout-tracker",
 	"private": true,
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
@@ -9,9 +9,16 @@
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"release": "semantic-release"
 	},
 	"devDependencies": {
+		"@semantic-release/changelog": "^6.0.3",
+		"@semantic-release/commit-analyzer": "^13.0.1",
+		"@semantic-release/git": "^10.0.1",
+		"@semantic-release/github": "^11.0.6",
+		"@semantic-release/npm": "^12.0.1",
+		"@semantic-release/release-notes-generator": "^14.1.0",
 		"@sveltejs/adapter-auto": "^7.0.0",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/adapter-vercel": "^6.3.3",
@@ -29,5 +36,38 @@
 		"chart.js": "^4.5.1",
 		"dexie": "^4.4.2",
 		"uuid": "^13.0.0"
+	},
+	"release": {
+		"branches": [
+			"main"
+		],
+		"plugins": [
+			"@semantic-release/commit-analyzer",
+			"@semantic-release/release-notes-generator",
+			[
+				"@semantic-release/changelog",
+				{
+					"changelogFile": "CHANGELOG.md"
+				}
+			],
+			[
+				"@semantic-release/npm",
+				{
+					"npmPublish": false
+				}
+			],
+			[
+				"@semantic-release/git",
+				{
+					"assets": [
+						"package.json",
+						"package-lock.json",
+						"CHANGELOG.md"
+					],
+					"message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+				}
+			],
+			"@semantic-release/github"
+		]
 	}
 }
