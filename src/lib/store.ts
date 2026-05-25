@@ -543,6 +543,13 @@ export function calculateProgression(
 	const lastWeight = completedSets[0].actualWeight ?? completedSets[0].targetWeight;
 	const lowestActualReps = Math.min(...completedSets.map(s => s.actualReps ?? 0));
 	const allHitCeiling = completedSets.every(s => (s.actualReps ?? 0) >= repGoal);
+	const manuallyIncreasedWeight = completedSets.every(set => {
+		const actualWeight = set.actualWeight ?? set.targetWeight;
+		return actualWeight >= set.targetWeight;
+	}) && completedSets.some(set => {
+		const actualWeight = set.actualWeight ?? set.targetWeight;
+		return actualWeight > set.targetWeight;
+	});
 	const previousTarget = getEffectivePreviousSessionTarget(completedSets, repGoal);
 	const allHitTarget = completedSets.every(s => (s.actualReps ?? 0) >= previousTarget);
 
@@ -565,6 +572,13 @@ export function calculateProgression(
 		return lastSets.map(() => ({
 			suggestedWeight: newWeight,
 			suggestedReps: resetReps
+		}));
+	}
+
+	if (manuallyIncreasedWeight) {
+		return lastSets.map(() => ({
+			suggestedWeight: lastWeight,
+			suggestedReps: lowestActualReps + 1
 		}));
 	}
 

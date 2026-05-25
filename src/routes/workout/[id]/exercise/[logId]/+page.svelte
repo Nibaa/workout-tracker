@@ -133,12 +133,19 @@
 		const previousSets = previousPerformance.sets;
 		const currentSets = getCompletedWorkingSets();
 		const comparableSetCount = Math.min(previousSets.length, currentSets.length);
+		let heavierThanPrevious = false;
 
 		for (let index = 0; index < comparableSetCount; index++) {
+			const previousWeight = previousSets[index].actualWeight ?? previousSets[index].targetWeight;
+			const currentWeight = currentSets[index].actualWeight ?? currentSets[index].targetWeight;
+			if (currentWeight > previousWeight) {
+				heavierThanPrevious = true;
+			}
+
 			const previousReps = previousSets[index].actualReps ?? previousSets[index].targetReps;
 			const currentReps = currentSets[index].actualReps ?? currentSets[index].targetReps;
 			if (currentReps < previousReps) {
-				return true;
+				return !heavierThanPrevious;
 			}
 		}
 
