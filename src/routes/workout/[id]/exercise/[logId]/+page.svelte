@@ -20,6 +20,8 @@
 	let previousPerformance = $state<{ weight: number; reps: number; sets: SetLog[] } | null>(null);
 	let showTargetAdjustmentPrompt = $state(false);
 	let adjustedTargetReps = $state<number | undefined>();
+	let exerciseName = $state('');
+	let isBodyweight = $state(false);
 
 	// Rest timer
 	let restActive = $state(false);
@@ -56,17 +58,25 @@
 		if (!exerciseLog) { goto(`/workout/${sessionId}`); return; }
 		const workoutSession = await db.workoutSessions.get(sessionId);
 
-		exercise = await getExercise(exerciseLog.exerciseId);
+		exercise = exerciseLog.exerciseId ? await getExercise(exerciseLog.exerciseId) : undefined;
+		exerciseName = exercise?.name ?? exerciseLog.customExerciseName ?? 'Custom exercise';
+		isBodyweight = exercise?.isBodyweight ?? exerciseLog.customExerciseBodyweight ?? false;
 		// Load slot for weight profile and increments
 		if (exerciseLog.slotId) {
 			slot = await db.exerciseSlots.get(exerciseLog.slotId);
+		} else {
+			slot = undefined;
 		}
 		if (slot?.incrementProfileId) {
 			profile = await getIncrementProfile(slot.incrementProfileId);
+		} else {
+			profile = undefined;
 		}
 		sets = await getSetLogs(logId);
-		if (workoutSession) {
+		if (workoutSession && exerciseLog.exerciseId) {
 			previousPerformance = await getLastPerformance(exerciseLog.exerciseId, workoutSession.splitDayId);
+		} else {
+			previousPerformance = null;
 		}
 
 		// Find first incomplete set
@@ -97,6 +107,22 @@
 		if (currentSetIndex < sets.length - 1) {
 			currentSetIndex++;
 			// Rest timer is manual-start, show the button but don't auto-start
+		}
+	}
+
+	async function handleUpdateCompletedSet(setIndex: number, field: 'actualWeight' | 'actualReps', value: number) {
+		const set = sets[setIndex];
+		await updateSetLog(set.id, { [field]: value });
+		sets[setIndex] = { ...set, [field]: value };
+	}
+
+	async function handleToggleSetCompleted(setIndex: number) {
+		const set = sets[setIndex];
+		const nextCompleted = !set.completed;
+		await updateSetLog(set.id, { completed: nextCompleted });
+		sets[setIndex] = { ...set, completed: nextCompleted };
+		if (!nextCompleted) {
+			currentSetIndex = setIndex;
 		}
 	}
 
@@ -211,18 +237,18 @@
 <div class="max-w-lg mx-auto px-4 pt-4">
 	{#if loading}
 		<div class="text-text-secondary text-center py-12">Loading...</div>
-	{:else if exercise}
+	{:else if exerciseLog}
 		<!-- Header -->
 		<div class="flex items-center justify-between mb-5">
 			<div>
-				<h1 class="text-xl font-bold">{exercise.name}</h1>
+				<h1 class="text-xl font-bold">{exerciseName}</h1>
 				<span class="text-text-muted text-sm">
 					{completedCount}/{sets.length} sets
-					{#if exercise.isBodyweight}
+					{#if isBodyweight}
 						· Bodyweight
 					{/if}
 				</span>
-				{#if exercise.notes}
+				{#if exercise?.notes}
 					<p class="text-text-secondary text-xs mt-1">{exercise.notes}</p>
 				{/if}
 			</div>
@@ -293,12 +319,36 @@
 			<div class="mb-4 space-y-2">
 				{#each sets as set, i}
 					{#if set.completed}
-						<div class="flex items-center gap-3 p-3 bg-dark-surface rounded-lg opacity-70">
-							<span class="text-success font-bold text-sm w-6">✓</span>
-							<span class="text-sm flex-1">Set {set.setNumber}</span>
-							<span class="text-sm text-text-secondary">
-								{set.actualWeight}kg × {set.actualReps} reps
-							</span>
+						<div class="p-3 bg-dark-surface rounded-lg border border-dark-border space-y-2">
+							<div class="flex items-center justify-between gap-3">
+								<span class="text-sm font-medium">Set {set.setNumber}</span>
+								<button onclick={() => handleToggleSetCompleted(i)} class="text-xs text-warning">Mark unfinished</button>
+							</div>
+							<div class="flex items-center gap-2">
+								{#if !isBodyweight}
+									<div class="flex-1">
+										<label class="text-[10px] text-text-muted block">kg</label>
+										<input
+											type="number"
+											value={set.actualWeight ?? set.targetWeight}
+											onchange={(e) => handleUpdateCompletedSet(i, 'actualWeight', Number(e.currentTarget.value))}
+											step="0.5"
+											min="0"
+											class="w-full bg-dark-card text-sm text-center py-1 rounded border border-dark-border focus:border-accent focus:outline-none"
+										/>
+									</div>
+								{/if}
+								<div class="flex-1">
+									<label class="text-[10px] text-text-muted block">reps</label>
+									<input
+										type="number"
+										value={set.actualReps ?? set.targetReps}
+										onchange={(e) => handleUpdateCompletedSet(i, 'actualReps', Number(e.currentTarget.value))}
+										min="0"
+										class="w-full bg-dark-card text-sm text-center py-1 rounded border border-dark-border focus:border-accent focus:outline-none"
+									/>
+								</div>
+							</div>
 						</div>
 					{/if}
 				{/each}
@@ -311,7 +361,7 @@
 				<h3 class="text-sm text-text-muted mb-4">Set {currentSet.setNumber} of {sets.length}</h3>
 
 				<!-- Weight Input -->
-				{#if !exercise.isBodyweight}
+				{#if !isBodyweight}
 					<div class="mb-4">
 						<label class="block text-xs text-text-secondary mb-2">Weight (kg)</label>
 						<div class="flex items-center gap-3">

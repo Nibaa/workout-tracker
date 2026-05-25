@@ -36,7 +36,7 @@
 
 		const rawLogs = await getExerciseLogs(session.id);
 		logs = await Promise.all(rawLogs.map(async (log) => {
-			const exercise = await getExercise(log.exerciseId);
+			const exercise = log.exerciseId ? await getExercise(log.exerciseId) : undefined;
 			const sets = await getSetLogs(log.id);
 			return { ...log, exercise, sets };
 		}));
@@ -153,7 +153,7 @@
 		{#each logs as log, logIndex}
 			<div class="bg-dark-card rounded-xl p-4 mb-3 border border-dark-border">
 				<div class="flex items-center justify-between mb-3">
-					<h3 class="font-semibold">{log.exercise?.name ?? 'Unknown Exercise'}</h3>
+					<h3 class="font-semibold">{log.exercise?.name ?? log.customExerciseName ?? 'Custom Exercise'}</h3>
 					<button
 						onclick={() => handleDeleteExerciseLog(logIndex)}
 						class="text-danger text-xs font-medium"

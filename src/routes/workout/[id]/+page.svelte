@@ -27,10 +27,17 @@
 		done?: boolean;
 		started?: boolean;
 	}>>([]);
+	let extraLogs = $state<SessionExerciseLog[]>([]);
 	let loading = $state(true);
 	let elapsed = $state('00:00');
 	let timer: ReturnType<typeof setInterval>;
 	let settings = $state<Settings>(getSettings());
+	let showAddCustomExercise = $state(false);
+	let customExerciseName = $state('');
+	let customExerciseSets = $state(3);
+	let customExerciseReps = $state<number | undefined>(8);
+	let customExerciseWeight = $state<number | undefined>(0);
+	let customExerciseBodyweight = $state(false);
 
 	const sessionId = $derived($page.params.id ?? '');
 
@@ -64,6 +71,13 @@
 
 		const rawSlots = await getExerciseSlots(currentSplitDay.id);
 		const existingLogs = await getExerciseLogs(session.id);
+		extraLogs = await Promise.all(existingLogs
+			.filter(log => !log.slotId)
+			.map(async (log) => ({
+				...log,
+				exercise: log.exerciseId ? await getExercise(log.exerciseId) : undefined,
+				sets: await getSetLogs(log.id)
+			})));
 
 		slots = await Promise.all(rawSlots.map(async (slot) => {
 			const exercise = await getExercise(slot.exerciseId);
@@ -113,10 +127,14 @@
 		loading = false;
 	}
 
+	function getNextLogOrder(): number {
+		return slots.reduce((count, currentSlot) => count + (currentSlot.logs?.length ?? 0), 0) + extraLogs.length;
+	}
+
 	async function startExercise(slot: typeof slots[0], exerciseId?: string) {
 		if (!session) return;
 		const eid = exerciseId ?? slot.suggestedExerciseId ?? slot.exerciseId;
-		const nextOrder = slots.reduce((count, currentSlot) => count + (currentSlot.logs?.length ?? 0), 0);
+		const nextOrder = getNextLogOrder();
 
 		const log = await createExerciseLog({
 			sessionId: session.id,
@@ -162,7 +180,7 @@
 	async function handleSkipExercise(slot: typeof slots[0]) {
 		if (!session) return;
 		// Create a log entry marked as finished immediately (skipped — 0 sets completed)
-		const nextOrder = slots.reduce((count, currentSlot) => count + (currentSlot.logs?.length ?? 0), 0);
+		const nextOrder = getNextLogOrder();
 		const eid = slot.availableExerciseIds?.includes(slot.suggestedExerciseId ?? '')
 			? slot.suggestedExerciseId
 			: slot.availableExerciseIds?.[0] ?? slot.exerciseId;
@@ -177,6 +195,37 @@
 		await loadSession();
 	}
 
+	async function handleAddCustomExercise() {
+		if (!session || !customExerciseName.trim()) return;
+
+		const log = await createExerciseLog({
+			sessionId: session.id,
+			customExerciseName: customExerciseName.trim(),
+			customExerciseBodyweight: customExerciseBodyweight,
+			order: getNextLogOrder()
+		});
+
+		for (let index = 0; index < customExerciseSets; index++) {
+			await createSetLog({
+				exerciseLogId: log.id,
+				setNumber: index + 1,
+				targetWeight: customExerciseBodyweight ? 0 : (customExerciseWeight ?? 0),
+				targetReps: customExerciseReps ?? settings.defaultRepTarget,
+				isWarmup: false,
+				completed: false
+			});
+		}
+
+		showAddCustomExercise = false;
+		customExerciseName = '';
+		customExerciseSets = 3;
+		customExerciseReps = 8;
+		customExerciseWeight = 0;
+		customExerciseBodyweight = false;
+
+		goto(`/workout/${session.id}/exercise/${log.id}`);
+	}
+
 	let showAbandonConfirm = $state(false);
 
 	function getSlotStatusColor(slot: typeof slots[0]): string {
@@ -187,7 +236,8 @@
 
 	function formatCompletedLogSummary(log: SessionExerciseLog, includeExerciseName: boolean): string {
 		const completedSets = log.sets.filter(set => set.completed);
-		const prefix = includeExerciseName ? `${log.exercise?.name ?? 'Unknown'}: ` : '';
+		const label = log.exercise?.name ?? log.customExerciseName ?? 'Custom exercise';
+		const prefix = includeExerciseName ? `${label}: ` : '';
 
 		if (completedSets.length === 0) {
 			return `${prefix}Skipped`;
@@ -196,6 +246,10 @@
 		return `${prefix}${completedSets
 			.map(set => `Set ${set.setNumber}: ${set.actualWeight ?? set.targetWeight}kg × ${set.actualReps ?? set.targetReps} reps`)
 			.join(' · ')}`;
+	}
+
+	function getLogDisplayName(log: SessionExerciseLog): string {
+		return log.exercise?.name ?? log.customExerciseName ?? 'Custom exercise';
 	}
 
 	function formatPlannedSetValue(plannedSet: PlannedExerciseSet): string {
@@ -295,8 +349,16 @@
 					{#if slot.completedLogs && slot.completedLogs.length > 0}
 						<div class="space-y-1 mb-3">
 							{#each slot.completedLogs as completedLog}
-								<div class="text-xs {completedLog.sets.filter(set => set.completed).length === 0 ? 'text-text-muted italic' : 'text-text-secondary'}">
-									{formatCompletedLogSummary(completedLog, slot.type === 'alternating')}
+								<div class="flex items-start gap-2">
+									<div class="flex-1 text-xs {completedLog.sets.filter(set => set.completed).length === 0 ? 'text-text-muted italic' : 'text-text-secondary'}">
+										{formatCompletedLogSummary(completedLog, slot.type === 'alternating')}
+									</div>
+									<button
+										onclick={() => goto(`/workout/${session!.id}/exercise/${completedLog.id}`)}
+										class="text-accent text-xs"
+									>
+										Edit
+									</button>
 								</div>
 							{/each}
 						</div>
@@ -376,6 +438,77 @@
 					{/if}
 				</div>
 			{/each}
+		</div>
+
+		<div class="mt-4 space-y-3">
+			{#if extraLogs.length > 0}
+				<div class="text-xs uppercase tracking-wide text-text-muted px-1">Extra Exercises</div>
+				{#each extraLogs as log}
+					<div class="bg-dark-card rounded-xl p-4 border-l-4 {log.finishedAt ? 'border-success' : 'border-warning'}">
+						<div class="flex items-center justify-between mb-2">
+							<div>
+								<span class="font-medium">{getLogDisplayName(log)}</span>
+								<span class="text-text-muted text-xs ml-1">(temporary)</span>
+							</div>
+							<span class="text-sm {log.finishedAt ? 'text-success' : 'text-warning'}">{log.finishedAt ? '✓ Done' : 'In progress'}</span>
+						</div>
+						<div class="text-text-secondary text-xs mb-3">
+							{formatCompletedLogSummary(log, false)}
+						</div>
+						<button
+							onclick={() => goto(`/workout/${session!.id}/exercise/${log.id}`)}
+							class="w-full bg-dark-surface text-accent py-2 rounded-lg text-sm font-medium"
+						>
+							{log.finishedAt ? 'Edit' : 'Resume'}
+						</button>
+					</div>
+				{/each}
+			{/if}
+
+			{#if showAddCustomExercise}
+				<div class="bg-dark-card rounded-xl p-4 border border-accent space-y-3">
+					<input
+						type="text"
+						bind:value={customExerciseName}
+						placeholder="Exercise name"
+						class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
+					/>
+					<div class="flex gap-2">
+						<div class="flex-1">
+							<label class="block text-xs text-text-secondary mb-1">Sets</label>
+							<input type="number" bind:value={customExerciseSets} min="1" max="20" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
+						</div>
+						<div class="flex-1">
+							<label class="block text-xs text-text-secondary mb-1">Reps</label>
+							<input type="number" bind:value={customExerciseReps} min="1" max="100" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
+						</div>
+						<div class="flex-1">
+							<label class="block text-xs text-text-secondary mb-1">Weight</label>
+							<input type="number" bind:value={customExerciseWeight} min="0" step="0.5" disabled={customExerciseBodyweight}
+								class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border disabled:text-text-muted" />
+						</div>
+					</div>
+					<label class="flex items-center gap-2 text-sm text-text-secondary">
+						<input type="checkbox" bind:checked={customExerciseBodyweight} class="accent-accent" />
+						Bodyweight exercise
+					</label>
+					<div class="flex gap-2">
+						<button onclick={handleAddCustomExercise} disabled={!customExerciseName.trim()} class="flex-1 bg-accent hover:bg-accent-hover disabled:bg-dark-surface text-white py-2 rounded-lg text-sm font-medium transition-colors">
+							Start custom exercise
+						</button>
+						<button onclick={() => showAddCustomExercise = false} class="px-4 bg-dark-surface text-text-secondary py-2 rounded-lg text-sm">
+							Cancel
+						</button>
+					</div>
+				</div>
+			{:else}
+				<button
+					onclick={() => showAddCustomExercise = true}
+					class="w-full bg-dark-card text-accent py-3 rounded-xl border border-dashed border-dark-border hover:border-accent transition-colors"
+				>
+					+ Add Custom Exercise
+				</button>
+			{/if}
 		</div>
 
 		<button

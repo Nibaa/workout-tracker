@@ -296,6 +296,10 @@ export async function createExerciseLog(data: Omit<ExerciseLog, 'id' | 'startedA
 	return log;
 }
 
+export async function updateExerciseLog(id: string, updates: Partial<Omit<ExerciseLog, 'id'>>): Promise<void> {
+	await db.exerciseLogs.update(id, updates);
+}
+
 export async function finishExerciseLog(id: string): Promise<void> {
 	const exerciseLog = await db.exerciseLogs.get(id);
 	await db.exerciseLogs.update(id, { finishedAt: new Date().toISOString() });
@@ -441,6 +445,8 @@ export async function planExerciseTargets(
 }
 
 async function syncSlotCurrentValuesFromExerciseLog(exerciseLog: ExerciseLog): Promise<void> {
+	if (!exerciseLog.slotId) return;
+	if (!exerciseLog.exerciseId) return;
 	const slot = await db.exerciseSlots.get(exerciseLog.slotId);
 	if (!slot) return;
 
@@ -452,14 +458,15 @@ async function syncSlotCurrentValuesFromExerciseLog(exerciseLog: ExerciseLog): P
 		reps: set.actualReps ?? set.targetReps
 	}));
 	const latestSet = normalizedSets[normalizedSets.length - 1];
-	const previousExerciseState = slot.exerciseInitialStatesById?.[exerciseLog.exerciseId];
+	const exerciseId = exerciseLog.exerciseId;
+	const previousExerciseState = slot.exerciseInitialStatesById?.[exerciseId];
 	const shouldStorePerSet = Boolean(previousExerciseState?.initialSets?.length || slot.initialSets?.length);
 	const updates: Partial<Omit<ExerciseSlot, 'id'>> = {
 		initialWeight: latestSet.weight,
 		initialReps: latestSet.reps,
 		exerciseInitialStatesById: {
 			...(slot.exerciseInitialStatesById ?? {}),
-			[exerciseLog.exerciseId]: {
+			[exerciseId]: {
 				initialWeight: latestSet.weight,
 				initialReps: latestSet.reps,
 				initialSets: shouldStorePerSet ? normalizedSets : undefined
@@ -627,6 +634,7 @@ export async function getAlternatingExerciseId(slot: ExerciseSlot, splitDayId: s
 
 	// Return the next exercise in rotation
 	const lastUsed = logs[0].exerciseId;
+	if (!lastUsed) return allIds[0];
 	const lastIndex = allIds.indexOf(lastUsed);
 	const nextIndex = (lastIndex + 1) % allIds.length;
 	return allIds[nextIndex];

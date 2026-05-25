@@ -97,8 +97,10 @@ export interface WorkoutSession {
 export interface ExerciseLog {
 	id: string;
 	sessionId: string;
-	exerciseId: string;
-	slotId: string;
+	exerciseId?: string;
+	customExerciseName?: string;
+	customExerciseBodyweight?: boolean;
+	slotId?: string;
 	order: number;
 	startedAt: string;
 	finishedAt?: string;
