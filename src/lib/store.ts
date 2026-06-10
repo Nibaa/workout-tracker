@@ -339,7 +339,7 @@ function getEffectivePreviousSessionTarget(lastSets: SetLog[], repGoal: number):
 	const storedTarget = lastSets[0]?.targetReps;
 	const highestActualReps = Math.max(...lastSets.map(set => set.actualReps ?? 0));
 
-	if (!storedTarget || storedTarget > repGoal) {
+	if (!storedTarget || storedTarget >= repGoal) {
 		return highestActualReps;
 	}
 
