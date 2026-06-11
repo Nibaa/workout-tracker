@@ -1,3 +1,17 @@
+# [1.2.0](https://github.com/Nibaa/workout-tracker/compare/v1.1.0...v1.2.0) (2026-06-11)
+
+
+### Bug Fixes
+
+* carry forward rep targets at ceiling ([e613029](https://github.com/Nibaa/workout-tracker/commit/e613029bd69bfa94d86bee9348a0c423b34b990d))
+* run release workflow on node 22 ([e1cb5f7](https://github.com/Nibaa/workout-tracker/commit/e1cb5f72b25112ad498f913936750756af04557f))
+* treat heavier weights as progress ([396ee30](https://github.com/Nibaa/workout-tracker/commit/396ee308d434a520606a19c1efd648b61e05fb70))
+
+
+### Features
+
+* support custom exercises in active workouts ([5c50f26](https://github.com/Nibaa/workout-tracker/commit/5c50f26625121079c6468f4b90912d8e2471fe4d))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
