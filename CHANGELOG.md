@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/Nibaa/workout-tracker/compare/v1.2.0...v1.3.0) (2026-06-18)
+
+
+### Features
+
+* use exercise list for mid-session additions ([1a27e17](https://github.com/Nibaa/workout-tracker/commit/1a27e17435338c82a5aef9a617d7a12fc554230f))
+
 # [1.2.0](https://github.com/Nibaa/workout-tracker/compare/v1.1.0...v1.2.0) (2026-06-11)
 
 
