@@ -3,9 +3,9 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
-		getExerciseSlots, getExerciseLogs, getExercise, getSetLogs,
+		getExerciseSlots, getExerciseLogs, getExercise, getExercises, getSetLogs,
 		finishWorkoutSession, createExerciseLog, getAlternatingExerciseId,
-		createSetLog, getSettings, getAllExerciseIdsForSlot,
+		createSetLog, getSettings, getAllExerciseIdsForSlot, getLastPerformance,
 		deleteWorkoutSession, planExerciseTargets, type PlannedExerciseSet
 	} from '$lib/store';
 	import { db } from '$lib/db';
@@ -28,16 +28,18 @@
 		started?: boolean;
 	}>>([]);
 	let extraLogs = $state<SessionExerciseLog[]>([]);
+	let allExercises = $state<Exercise[]>([]);
 	let loading = $state(true);
 	let elapsed = $state('00:00');
 	let timer: ReturnType<typeof setInterval>;
 	let settings = $state<Settings>(getSettings());
-	let showAddCustomExercise = $state(false);
-	let customExerciseName = $state('');
-	let customExerciseSets = $state(3);
-	let customExerciseReps = $state<number | undefined>(8);
-	let customExerciseWeight = $state<number | undefined>(0);
-	let customExerciseBodyweight = $state(false);
+	let showAddExercise = $state(false);
+	let extraExerciseId = $state('');
+	let extraExerciseSets = $state(3);
+	let extraExerciseReps = $state<number | undefined>(8);
+	let extraExerciseWeight = $state<number | undefined>(0);
+	let showSubstituteBySlotId = $state<Record<string, boolean>>({});
+	let substituteExerciseIdsBySlotId = $state<Record<string, string>>({});
 
 	const sessionId = $derived($page.params.id ?? '');
 
@@ -64,6 +66,7 @@
 		if (!sessionId) { goto('/'); return; }
 		session = await db.workoutSessions.get(sessionId);
 		if (!session) { goto('/'); return; }
+		allExercises = await getExercises();
 
 		const currentSplitDay = await db.splitDays.get(session.splitDayId);
 		if (!currentSplitDay) { goto('/'); return; }
@@ -195,35 +198,102 @@
 		await loadSession();
 	}
 
-	async function handleAddCustomExercise() {
-		if (!session || !customExerciseName.trim()) return;
+	async function handleExtraExerciseSelection(exerciseId: string) {
+		extraExerciseId = exerciseId;
+
+		if (!session || !exerciseId) {
+			return;
+		}
+
+		const exercise = allExercises.find(candidate => candidate.id === exerciseId);
+		if (!exercise) {
+			return;
+		}
+
+		const lastPerformance = await getLastPerformance(exerciseId, session.splitDayId);
+		extraExerciseSets = lastPerformance?.sets.length ?? 3;
+		extraExerciseReps = lastPerformance?.sets[0]?.targetReps ?? Math.max(1, settings.defaultRepTarget - 4);
+		extraExerciseWeight = exercise.isBodyweight
+			? 0
+			: (lastPerformance?.sets[0]
+				? (lastPerformance.sets[0].actualWeight ?? lastPerformance.sets[0].targetWeight)
+				: 0);
+	}
+
+	function resetAddExerciseForm() {
+		showAddExercise = false;
+		extraExerciseId = '';
+		extraExerciseSets = 3;
+		extraExerciseReps = Math.max(1, settings.defaultRepTarget - 4);
+		extraExerciseWeight = 0;
+	}
+
+	async function handleAddExercise() {
+		if (!session || !extraExerciseId) return;
+
+		const selectedExercise = allExercises.find(exercise => exercise.id === extraExerciseId);
+		if (!selectedExercise) return;
 
 		const log = await createExerciseLog({
 			sessionId: session.id,
-			customExerciseName: customExerciseName.trim(),
-			customExerciseBodyweight: customExerciseBodyweight,
+			exerciseId: selectedExercise.id,
 			order: getNextLogOrder()
 		});
 
-		for (let index = 0; index < customExerciseSets; index++) {
+		for (let index = 0; index < extraExerciseSets; index++) {
 			await createSetLog({
 				exerciseLogId: log.id,
 				setNumber: index + 1,
-				targetWeight: customExerciseBodyweight ? 0 : (customExerciseWeight ?? 0),
-				targetReps: customExerciseReps ?? settings.defaultRepTarget,
+				targetWeight: selectedExercise.isBodyweight ? 0 : (extraExerciseWeight ?? 0),
+				targetReps: extraExerciseReps ?? settings.defaultRepTarget,
 				isWarmup: false,
 				completed: false
 			});
 		}
 
-		showAddCustomExercise = false;
-		customExerciseName = '';
-		customExerciseSets = 3;
-		customExerciseReps = 8;
-		customExerciseWeight = 0;
-		customExerciseBodyweight = false;
+		resetAddExerciseForm();
 
 		goto(`/workout/${session.id}/exercise/${log.id}`);
+	}
+
+	function getSubstituteExerciseOptions(slot: typeof slots[0]): Exercise[] {
+		const slotExerciseIds = new Set(getAllExerciseIdsForSlot(slot));
+		const usedExerciseIds = new Set(
+			(slot.logs ?? [])
+				.map(log => log.exerciseId)
+				.filter((exerciseId): exerciseId is string => !!exerciseId)
+		);
+
+		return allExercises.filter(exercise => !slotExerciseIds.has(exercise.id) && !usedExerciseIds.has(exercise.id));
+	}
+
+	function openSubstitutePicker(slot: typeof slots[0]) {
+		const [firstOption] = getSubstituteExerciseOptions(slot);
+		if (!firstOption) return;
+
+		substituteExerciseIdsBySlotId = {
+			...substituteExerciseIdsBySlotId,
+			[slot.id]: substituteExerciseIdsBySlotId[slot.id] ?? firstOption.id
+		};
+		showSubstituteBySlotId = {
+			...showSubstituteBySlotId,
+			[slot.id]: true
+		};
+	}
+
+	function closeSubstitutePicker(slotId: string) {
+		showSubstituteBySlotId = {
+			...showSubstituteBySlotId,
+			[slotId]: false
+		};
+	}
+
+	async function handleStartSubstitute(slot: typeof slots[0]) {
+		const selectedExerciseId = substituteExerciseIdsBySlotId[slot.id] ?? getSubstituteExerciseOptions(slot)[0]?.id;
+		if (!selectedExerciseId) return;
+
+		closeSubstitutePicker(slot.id);
+		await startExercise(slot, selectedExerciseId);
 	}
 
 	let showAbandonConfirm = $state(false);
@@ -250,6 +320,22 @@
 
 	function getLogDisplayName(log: SessionExerciseLog): string {
 		return log.exercise?.name ?? log.customExerciseName ?? 'Custom exercise';
+	}
+
+	function shouldIncludeExerciseName(slot: typeof slots[0], log: SessionExerciseLog): boolean {
+		if (slot.type === 'alternating' || log.customExerciseName) {
+			return true;
+		}
+
+		if (!log.exerciseId) {
+			return false;
+		}
+
+		return !getAllExerciseIdsForSlot(slot).includes(log.exerciseId);
+	}
+
+	function getSelectedExtraExercise(): Exercise | undefined {
+		return allExercises.find(exercise => exercise.id === extraExerciseId);
 	}
 
 	function formatPlannedSetValue(plannedSet: PlannedExerciseSet): string {
@@ -322,6 +408,7 @@
 		<div class="space-y-3">
 			{#each slots as slot}
 				<div class="bg-dark-card rounded-xl p-4 border-l-4 {getSlotStatusColor(slot)}">
+					{@const substituteOptions = getSubstituteExerciseOptions(slot)}
 					<div class="flex items-center justify-between mb-2">
 						<div>
 							<span class="font-medium">{slot.exercise?.name ?? 'Unknown'}</span>
@@ -351,7 +438,7 @@
 							{#each slot.completedLogs as completedLog}
 								<div class="flex items-start gap-2">
 									<div class="flex-1 text-xs {completedLog.sets.filter(set => set.completed).length === 0 ? 'text-text-muted italic' : 'text-text-secondary'}">
-										{formatCompletedLogSummary(completedLog, slot.type === 'alternating')}
+										{formatCompletedLogSummary(completedLog, shouldIncludeExerciseName(slot, completedLog))}
 									</div>
 									<button
 										onclick={() => goto(`/workout/${session!.id}/exercise/${completedLog.id}`)}
@@ -434,7 +521,48 @@
 							>
 								Skip
 							</button>
+							{#if substituteOptions.length > 0}
+								<button
+									onclick={() => openSubstitutePicker(slot)}
+									class="bg-dark-surface text-text-muted hover:text-accent py-2 px-3 rounded-lg text-sm transition-colors"
+								>
+									Substitute
+								</button>
+							{/if}
 						</div>
+						{#if showSubstituteBySlotId[slot.id] && substituteOptions.length > 0}
+							<div class="mt-3 rounded-lg border border-dark-border bg-dark-surface p-3 space-y-3">
+								<div class="text-xs text-text-muted">Choose a replacement from your exercise list for this slot.</div>
+								<select
+									value={substituteExerciseIdsBySlotId[slot.id] ?? substituteOptions[0]?.id}
+									onchange={(event) => {
+										substituteExerciseIdsBySlotId = {
+											...substituteExerciseIdsBySlotId,
+											[slot.id]: (event.currentTarget as HTMLSelectElement).value
+										};
+									}}
+									class="w-full bg-dark-card text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
+								>
+									{#each substituteOptions as exercise}
+										<option value={exercise.id}>{exercise.name}</option>
+									{/each}
+								</select>
+								<div class="flex gap-2">
+									<button
+										onclick={() => handleStartSubstitute(slot)}
+										class="flex-1 bg-accent hover:bg-accent-hover text-white py-2 rounded-lg text-sm font-medium transition-colors"
+									>
+										Start substitute
+									</button>
+									<button
+										onclick={() => closeSubstitutePicker(slot.id)}
+										class="px-4 bg-dark-card text-text-secondary py-2 rounded-lg text-sm"
+									>
+										Cancel
+									</button>
+								</div>
+							</div>
+						{/if}
 					{/if}
 				</div>
 			{/each}
@@ -448,7 +576,7 @@
 						<div class="flex items-center justify-between mb-2">
 							<div>
 								<span class="font-medium">{getLogDisplayName(log)}</span>
-								<span class="text-text-muted text-xs ml-1">(temporary)</span>
+								<span class="text-text-muted text-xs ml-1">(extra)</span>
 							</div>
 							<span class="text-sm {log.finishedAt ? 'text-success' : 'text-warning'}">{log.finishedAt ? '✓ Done' : 'In progress'}</span>
 						</div>
@@ -465,48 +593,53 @@
 				{/each}
 			{/if}
 
-			{#if showAddCustomExercise}
+			{#if showAddExercise}
 				<div class="bg-dark-card rounded-xl p-4 border border-accent space-y-3">
-					<input
-						type="text"
-						bind:value={customExerciseName}
-						placeholder="Exercise name"
+					<div class="text-xs text-text-muted">Pick an exercise from your saved list and set this session's targets.</div>
+					<select
+						value={extraExerciseId}
+						onchange={(event) => handleExtraExerciseSelection((event.currentTarget as HTMLSelectElement).value)}
 						class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
-					/>
+					>
+						<option value="">Select exercise</option>
+						{#each allExercises as exercise}
+							<option value={exercise.id}>{exercise.name}</option>
+						{/each}
+					</select>
+					{@const selectedExtraExercise = getSelectedExtraExercise()}
 					<div class="flex gap-2">
 						<div class="flex-1">
 							<label class="block text-xs text-text-secondary mb-1">Sets</label>
-							<input type="number" bind:value={customExerciseSets} min="1" max="20" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
+							<input type="number" bind:value={extraExerciseSets} min="1" max="20" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
 						</div>
 						<div class="flex-1">
 							<label class="block text-xs text-text-secondary mb-1">Reps</label>
-							<input type="number" bind:value={customExerciseReps} min="1" max="100" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
+							<input type="number" bind:value={extraExerciseReps} min="1" max="100" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
 						</div>
 						<div class="flex-1">
 							<label class="block text-xs text-text-secondary mb-1">Weight</label>
-							<input type="number" bind:value={customExerciseWeight} min="0" step="0.5" disabled={customExerciseBodyweight}
+							<input type="number" bind:value={extraExerciseWeight} min="0" step="0.5" disabled={selectedExtraExercise?.isBodyweight ?? false}
 								class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border disabled:text-text-muted" />
 						</div>
 					</div>
-					<label class="flex items-center gap-2 text-sm text-text-secondary">
-						<input type="checkbox" bind:checked={customExerciseBodyweight} class="accent-accent" />
-						Bodyweight exercise
-					</label>
+					{#if selectedExtraExercise?.isBodyweight}
+						<div class="text-xs text-text-muted">This exercise is marked as bodyweight, so weight stays at 0.</div>
+					{/if}
 					<div class="flex gap-2">
-						<button onclick={handleAddCustomExercise} disabled={!customExerciseName.trim()} class="flex-1 bg-accent hover:bg-accent-hover disabled:bg-dark-surface text-white py-2 rounded-lg text-sm font-medium transition-colors">
-							Start custom exercise
+						<button onclick={handleAddExercise} disabled={!extraExerciseId} class="flex-1 bg-accent hover:bg-accent-hover disabled:bg-dark-surface text-white py-2 rounded-lg text-sm font-medium transition-colors">
+							Start extra exercise
 						</button>
-						<button onclick={() => showAddCustomExercise = false} class="px-4 bg-dark-surface text-text-secondary py-2 rounded-lg text-sm">
+						<button onclick={resetAddExerciseForm} class="px-4 bg-dark-surface text-text-secondary py-2 rounded-lg text-sm">
 							Cancel
 						</button>
 					</div>
 				</div>
 			{:else}
 				<button
-					onclick={() => showAddCustomExercise = true}
+					onclick={() => showAddExercise = true}
 					class="w-full bg-dark-card text-accent py-3 rounded-xl border border-dashed border-dark-border hover:border-accent transition-colors"
 				>
-					+ Add Custom Exercise
+					+ Add Exercise From List
 				</button>
 			{/if}
 		</div>
