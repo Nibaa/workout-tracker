@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/Nibaa/workout-tracker/compare/v1.3.0...v1.3.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* correct workout page const placement ([91ea83f](https://github.com/Nibaa/workout-tracker/commit/91ea83fcc9bbed430c5a36086d0408d76af21131))
+
 # [1.3.0](https://github.com/Nibaa/workout-tracker/compare/v1.2.0...v1.3.0) (2026-06-18)
 
 
