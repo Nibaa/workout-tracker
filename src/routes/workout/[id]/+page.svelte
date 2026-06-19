@@ -407,8 +407,8 @@
 
 		<div class="space-y-3">
 			{#each slots as slot}
+				{@const substituteOptions = getSubstituteExerciseOptions(slot)}
 				<div class="bg-dark-card rounded-xl p-4 border-l-4 {getSlotStatusColor(slot)}">
-					{@const substituteOptions = getSubstituteExerciseOptions(slot)}
 					<div class="flex items-center justify-between mb-2">
 						<div>
 							<span class="font-medium">{slot.exercise?.name ?? 'Unknown'}</span>
@@ -594,6 +594,7 @@
 			{/if}
 
 			{#if showAddExercise}
+				{@const selectedExtraExercise = getSelectedExtraExercise()}
 				<div class="bg-dark-card rounded-xl p-4 border border-accent space-y-3">
 					<div class="text-xs text-text-muted">Pick an exercise from your saved list and set this session's targets.</div>
 					<select
@@ -606,7 +607,6 @@
 							<option value={exercise.id}>{exercise.name}</option>
 						{/each}
 					</select>
-					{@const selectedExtraExercise = getSelectedExtraExercise()}
 					<div class="flex gap-2">
 						<div class="flex-1">
 							<label class="block text-xs text-text-secondary mb-1">Sets</label>
