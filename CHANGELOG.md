@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/Nibaa/workout-tracker/compare/v1.3.2...v1.4.0) (2026-06-23)
+
+
+### Features
+
+* add notes, reminders, and deload ([e8950ef](https://github.com/Nibaa/workout-tracker/commit/e8950eff4f9ae5bb0bb33ba0535630b9ebe112a7))
+
 ## [1.3.2](https://github.com/Nibaa/workout-tracker/compare/v1.3.1...v1.3.2) (2026-06-23)
 
 
