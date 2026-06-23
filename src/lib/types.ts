@@ -7,6 +7,7 @@ export interface Split {
 	name: string;
 	type: 'weekday' | 'sequential';
 	createdAt: string;
+	notes?: string;
 }
 
 export interface SplitDay {
@@ -17,6 +18,8 @@ export interface SplitDay {
 	order: number;
 	/** Default rep goal for exercises in this split day */
 	defaultRepTarget?: number;
+	/** Persistent reminder note shown at the start of the next session for this day */
+	reminderNote?: string;
 }
 
 export interface MuscleGroup {
@@ -81,6 +84,10 @@ export interface ExerciseSlot {
 	initialSets?: Array<{ weight: number; reps: number }>;
 	/** Per-exercise initial values for alternating slots */
 	exerciseInitialStatesById?: Record<string, ExerciseSlotExerciseState>;
+	/** One-shot deload override: next session uses this weight instead of progression. Cleared after being applied. */
+	deloadWeight?: number;
+	/** Target reps for the deload session */
+	deloadReps?: number;
 }
 
 export interface WorkoutSession {

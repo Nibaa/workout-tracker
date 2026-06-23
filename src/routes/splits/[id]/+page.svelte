@@ -24,6 +24,15 @@
 	let settings = $state<Settings>(getSettings());
 	let loading = $state(true);
 
+	// Notes and deload
+	let editingSplitNotes = $state(false);
+	let splitNotesValue = $state('');
+	let editingDayNoteId = $state<string | null>(null);
+	let editingDayNoteValue = $state('');
+	let deloadingSlotId = $state<string | null>(null);
+	let deloadWeightValue = $state<number | undefined>();
+	let deloadRepsValue = $state(6);
+
 	// New day form
 	let showAddDay = $state(false);
 	let newDayName = $state('');
@@ -83,6 +92,7 @@
 		split = await getSplit(splitId);
 		if (!split) { goto('/splits'); return; }
 		editName = split.name;
+		splitNotesValue = split.notes ?? '';
 
 		const rawDays = await getSplitDays(splitId);
 		days = await Promise.all(rawDays.map(async (day) => {
@@ -301,6 +311,39 @@
 
 		return null;
 	}
+
+	async function saveSplitNotes() {
+		if (!split) return;
+		const trimmed = splitNotesValue.trim();
+		await updateSplit(split.id, { notes: trimmed || undefined });
+		split = { ...split, notes: trimmed || undefined };
+		editingSplitNotes = false;
+	}
+
+	async function saveDayNote(dayId: string) {
+		const trimmed = editingDayNoteValue.trim();
+		await updateSplitDay(dayId, { reminderNote: trimmed || undefined });
+		editingDayNoteId = null;
+		await loadData();
+	}
+
+	function startDeload(slot: ExerciseSlot) {
+		deloadingSlotId = slot.id;
+		deloadWeightValue = slot.deloadWeight ?? slot.initialWeight ?? 0;
+		deloadRepsValue = slot.deloadReps ?? 6;
+	}
+
+	async function handleDeload(slotId: string) {
+		if (deloadWeightValue === undefined) return;
+		await updateExerciseSlot(slotId, { deloadWeight: deloadWeightValue, deloadReps: deloadRepsValue });
+		deloadingSlotId = null;
+		await loadData();
+	}
+
+	async function clearDeload(slotId: string) {
+		await updateExerciseSlot(slotId, { deloadWeight: undefined, deloadReps: undefined });
+		await loadData();
+	}
 </script>
 
 <div class="max-w-lg mx-auto px-4 pt-6">
@@ -324,7 +367,27 @@
 			{/if}
 		</div>
 
-		<p class="text-text-muted text-sm mb-4 capitalize">{split.type} split</p>
+		<p class="text-text-muted text-sm mb-2 capitalize">{split.type} split</p>
+
+		{#if editingSplitNotes}
+			<div class="bg-dark-card rounded-xl p-4 mb-4 space-y-2">
+				<textarea bind:value={splitNotesValue} placeholder="General notes for this split..." rows="3"
+					class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none resize-none text-sm"></textarea>
+				<div class="flex gap-2">
+					<button onclick={saveSplitNotes} class="flex-1 bg-accent hover:bg-accent-hover text-white py-1.5 rounded text-sm font-medium">Save</button>
+					<button onclick={() => { editingSplitNotes = false; splitNotesValue = split?.notes ?? ''; }} class="px-4 bg-dark-surface text-text-secondary py-1.5 rounded text-sm">Cancel</button>
+				</div>
+			</div>
+		{:else if split.notes}
+			<div class="bg-dark-card rounded-xl p-4 mb-4 border border-dark-border">
+				<div class="flex items-start justify-between gap-2">
+					<p class="text-sm text-text-secondary flex-1">{split.notes}</p>
+					<button onclick={() => { splitNotesValue = split?.notes ?? ''; editingSplitNotes = true; }} class="text-accent text-xs shrink-0">Edit</button>
+				</div>
+			</div>
+		{:else}
+			<button onclick={() => { splitNotesValue = ''; editingSplitNotes = true; }} class="text-accent text-sm mb-4 block hover:underline">+ Add notes</button>
+		{/if}
 
 		<!-- Days -->
 		{#each days as day, dayIndex}
@@ -340,8 +403,12 @@
 						{#if day.defaultRepTarget}
 							<span class="text-text-muted text-xs ml-1">· {day.defaultRepTarget} rep goal</span>
 						{/if}
+						{#if day.reminderNote}
+							<p class="text-xs text-warning mt-1">📌 {day.reminderNote}</p>
+						{/if}
 					</div>
 					<div class="flex gap-2 items-center">
+						<button onclick={() => { editingDayNoteId = day.id; editingDayNoteValue = day.reminderNote ?? ''; }} class="text-accent text-xs">Note</button>
 						<button onclick={async () => {
 							const val = prompt('Default rep goal for this day (empty = use global):', String(day.defaultRepTarget ?? ''));
 							if (val !== null) {
@@ -353,6 +420,19 @@
 						<button onclick={() => handleDeleteDay(day.id)} class="text-danger text-xs">Delete</button>
 					</div>
 				</div>
+
+				{#if editingDayNoteId === day.id}
+					<div class="mb-3 space-y-2">
+						<textarea bind:value={editingDayNoteValue}
+							placeholder="Reminder shown at the start of the next session for this day..."
+							rows="2"
+							class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none resize-none text-sm"></textarea>
+						<div class="flex gap-2">
+							<button onclick={() => saveDayNote(day.id)} class="flex-1 bg-accent hover:bg-accent-hover text-white py-1.5 rounded text-sm font-medium">Save</button>
+							<button onclick={() => editingDayNoteId = null} class="px-4 bg-dark-surface text-text-secondary py-1.5 rounded text-sm">Cancel</button>
+						</div>
+					</div>
+				{/if}
 
 				<!-- Slots -->
 				{#if day.slots.length > 0}
@@ -598,9 +678,46 @@
 										{/if}
 									{/if}
 								</div>
-								<button onclick={() => startEditSlot(slot)} class="text-accent text-xs">Edit</button>
-								<button onclick={() => handleDeleteSlot(slot.id)} class="text-danger text-xs">×</button>
-							</div>
+									{#if slot.deloadWeight !== undefined}
+										<span class="text-warning text-xs" title="Deload queued">⚡</span>
+									{/if}
+									<button onclick={() => startDeload(slot)} class="text-text-muted hover:text-warning text-xs">Deload</button>
+									<button onclick={() => startEditSlot(slot)} class="text-accent text-xs">Edit</button>
+									<button onclick={() => handleDeleteSlot(slot.id)} class="text-danger text-xs">×</button>
+								</div>
+								{#if slot.deloadWeight !== undefined && deloadingSlotId !== slot.id}
+									<div class="mt-1 text-xs text-warning px-2">
+										⚡ Deload queued: {slot.deloadWeight}kg × {slot.deloadReps ?? 6} reps
+										<button onclick={() => clearDeload(slot.id)} class="text-danger ml-1">clear</button>
+									</div>
+								{/if}
+								{#if deloadingSlotId === slot.id}
+									<div class="mt-2 rounded-lg border border-warning/50 bg-dark-surface p-3 space-y-3">
+										<p class="text-xs text-warning">Next session will use these values instead of the progression.</p>
+										<div class="flex gap-2">
+											<div class="flex-1">
+												<label class="text-xs text-text-muted">Weight (kg)</label>
+												<input type="number" bind:value={deloadWeightValue} min="0" step="0.5"
+													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+											</div>
+											<div class="flex-1">
+												<label class="text-xs text-text-muted">Target reps</label>
+												<input type="number" bind:value={deloadRepsValue} min="1" max="50"
+													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+											</div>
+										</div>
+										<div class="flex gap-2">
+											<button onclick={() => handleDeload(slot.id)} disabled={deloadWeightValue === undefined}
+												class="flex-1 bg-warning/20 hover:bg-warning/30 text-warning py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50">
+												Set deload
+											</button>
+											<button onclick={() => deloadingSlotId = null}
+												class="px-4 bg-dark-card text-text-secondary py-1.5 rounded text-sm">
+												Cancel
+											</button>
+										</div>
+									</div>
+								{/if}
 							{/if}
 						{/each}
 					</div>

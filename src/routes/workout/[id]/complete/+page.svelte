@@ -2,13 +2,14 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getExerciseLogs, getSetLogs, getWorkoutStreak } from '$lib/store';
+	import { getExerciseLogs, getSetLogs, getWorkoutStreak, updateWorkoutSession } from '$lib/store';
 	import { db } from '$lib/db';
 	import type { WorkoutSession, SplitDay } from '$lib/types';
 
 	let session = $state<WorkoutSession | undefined>();
 	let splitDay = $state<SplitDay | undefined>();
 	let loading = $state(true);
+	let sessionNotes = $state('');
 	let duration = $state('');
 	let totalSets = $state(0);
 	let totalReps = $state(0);
@@ -32,7 +33,7 @@
 			goto('/');
 			return;
 		}
-
+		sessionNotes = session.notes ?? '';
 		splitDay = await db.splitDays.get(session.splitDayId);
 
 		// Calculate duration
@@ -63,6 +64,13 @@
 		totalWorkouts = streak.totalWorkouts;
 
 		loading = false;
+	}
+
+	async function saveSessionNotes() {
+		if (!session) return;
+		const trimmed = sessionNotes.trim();
+		await updateWorkoutSession(session.id, { notes: trimmed || undefined });
+		session = { ...session, notes: trimmed || undefined };
 	}
 </script>
 
@@ -128,6 +136,23 @@
 			{:else if streakDays > 0}
 				<p class="text-success text-xs mt-3 font-medium">🔥 This is your longest streak!</p>
 			{/if}
+		</div>
+
+		<!-- Session Notes -->
+		<div class="bg-dark-card rounded-xl p-4 mb-6 text-left">
+			<label class="block text-xs text-text-muted mb-2">Session notes</label>
+			<textarea
+				bind:value={sessionNotes}
+				placeholder="e.g. skipped fly because of elbow pain, felt strong today..."
+				rows="3"
+				class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none resize-none text-sm"
+			></textarea>
+			<button
+				onclick={saveSessionNotes}
+				class="mt-2 w-full bg-dark-surface hover:bg-dark-card text-accent py-2 rounded-lg text-sm font-medium transition-colors"
+			>
+				Save note
+			</button>
 		</div>
 
 		<!-- Navigation -->

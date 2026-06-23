@@ -382,6 +382,17 @@ export async function planExerciseTargets(
 		profile = await getIncrementProfile(slot.incrementProfileId);
 	}
 
+	// Deload override: bypass progression and use specified values for next session only
+	if (slot.deloadWeight !== undefined) {
+		const targetWeight = exercise?.isBodyweight ? 0 : slot.deloadWeight;
+		const targetReps = slot.deloadReps ?? 6;
+		return Array.from({ length: slot.targetSets }, (_, index) => ({
+			setNumber: index + 1,
+			targetWeight,
+			targetReps
+		}));
+	}
+
 	const last = await getLastPerformance(exerciseId, splitDayId);
 	const plannedSets: PlannedExerciseSet[] = [];
 	const initialState = getExerciseInitialStateForSlot(slot, exerciseId);

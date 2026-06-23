@@ -6,7 +6,8 @@
 		getExerciseSlots, getExerciseLogs, getExercise, getExercises, getSetLogs,
 		finishWorkoutSession, createExerciseLog, getAlternatingExerciseId,
 		createSetLog, getSettings, getAllExerciseIdsForSlot, getLastPerformance,
-		deleteWorkoutSession, planExerciseTargets, type PlannedExerciseSet
+		updateExerciseSlot, deleteWorkoutSession, planExerciseTargets, type PlannedExerciseSet,
+		updateSplitDay
 	} from '$lib/store';
 	import { db } from '$lib/db';
 	import type { WorkoutSession, SplitDay, ExerciseSlot, ExerciseLog, SetLog, Exercise, Settings } from '$lib/types';
@@ -165,6 +166,10 @@
 			});
 		}
 
+		if (slot.deloadWeight !== undefined) {
+			await updateExerciseSlot(slot.id, { deloadWeight: undefined, deloadReps: undefined });
+		}
+
 		goto(`/workout/${session.id}/exercise/${log.id}`);
 	}
 
@@ -296,7 +301,18 @@
 		await startExercise(slot, selectedExerciseId);
 	}
 
+	async function saveReminderNote() {
+		if (!splitDay) return;
+		const trimmed = reminderNoteValue.trim();
+		await updateSplitDay(splitDay.id, { reminderNote: trimmed || undefined });
+		splitDay = { ...splitDay, reminderNote: trimmed || undefined };
+		editingReminderNote = false;
+	}
+
 	let showAbandonConfirm = $state(false);
+	let dismissedReminderNote = $state(false);
+	let editingReminderNote = $state(false);
+	let reminderNoteValue = $state('');
 
 	function getSlotStatusColor(slot: typeof slots[0]): string {
 		if (slot.activeLog) return 'border-warning';
@@ -384,6 +400,38 @@
 				</button>
 			</div>
 		</div>
+
+		{#if editingReminderNote}
+			<div class="bg-dark-card rounded-xl p-4 mb-4 space-y-2">
+				<p class="text-xs font-semibold text-warning">Reminder for {splitDay.name}</p>
+				<textarea bind:value={reminderNoteValue} placeholder="Reminder shown next time this day comes up..." rows="2"
+					class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none resize-none text-sm"
+				></textarea>
+				<div class="flex gap-2">
+					<button onclick={saveReminderNote} class="flex-1 bg-accent hover:bg-accent-hover text-white py-1.5 rounded text-sm font-medium">Save</button>
+					<button onclick={() => editingReminderNote = false} class="px-4 bg-dark-surface text-text-secondary py-1.5 rounded text-sm">Cancel</button>
+				</div>
+			</div>
+		{:else if splitDay.reminderNote && !dismissedReminderNote}
+			<div class="bg-warning/10 border border-warning/50 rounded-xl p-4 mb-4">
+				<div class="flex items-start justify-between gap-3">
+					<div class="flex-1">
+						<p class="text-xs font-semibold text-warning mb-1">Reminder for {splitDay.name}</p>
+						<p class="text-sm text-text-primary">{splitDay.reminderNote}</p>
+					</div>
+					<div class="flex gap-2 items-center shrink-0">
+						<button onclick={() => { reminderNoteValue = splitDay!.reminderNote ?? ''; editingReminderNote = true; }} class="text-warning text-xs">Edit</button>
+						<button onclick={() => dismissedReminderNote = true} class="text-warning text-lg leading-none">×</button>
+					</div>
+				</div>
+			</div>
+		{:else}
+			<button onclick={() => { reminderNoteValue = splitDay.reminderNote ?? ''; editingReminderNote = true; }}
+				class="text-text-muted hover:text-accent text-xs mb-3 block"
+			>
+				+ Set reminder for next {splitDay.name}
+			</button>
+		{/if}
 
 		{#if showAbandonConfirm}
 			<div class="bg-danger/10 rounded-xl p-4 border border-danger mb-4">
