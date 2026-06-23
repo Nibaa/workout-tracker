@@ -574,8 +574,9 @@ export function calculateProgression(
 			newWeight = lastWeight + weightIncrement;
 		}
 
-		// Reset reps: start fresh at a base level (threshold - 4, minimum 1)
-		const resetReps = Math.max(1, repGoal - 4);
+		// Reset reps to a low baseline so the first session at the new weight
+		// sets the real baseline, rather than inheriting an arbitrary preset target.
+		const resetReps = 6;
 		return lastSets.map(() => ({
 			suggestedWeight: newWeight,
 			suggestedReps: resetReps
