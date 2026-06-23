@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/Nibaa/workout-tracker/compare/v1.3.1...v1.3.2) (2026-06-23)
+
+
+### Bug Fixes
+
+* reset to rep baseline 6 after weight increase ([b6b2663](https://github.com/Nibaa/workout-tracker/commit/b6b26636db99d3591db097700a2234dec2e6c2b6))
+
 ## [1.3.1](https://github.com/Nibaa/workout-tracker/compare/v1.3.0...v1.3.1) (2026-06-19)
 
 
