@@ -198,11 +198,12 @@
 
 			<!-- Secondary Muscle Groups -->
 			<div>
-				<label class="text-xs text-text-muted">Secondary muscle groups (up to 2)</label>
+				<p class="text-xs text-text-muted">Secondary muscle groups (up to 2)</p>
 				<div class="space-y-2 mt-1">
 					{#each [0, 1] as i}
 						<select
 							value={newSecondaryGroupIds[i] ?? ''}
+							aria-label={i === 0 ? 'Primary secondary muscle group' : 'Second secondary muscle group'}
 							onchange={(e) => {
 								const val = (e.target as HTMLSelectElement).value;
 								const updated = [...newSecondaryGroupIds];
@@ -264,10 +265,11 @@
 								</select>
 								<!-- Secondary groups in edit -->
 								<div>
-									<label class="text-xs text-text-muted">Secondary groups</label>
+									<p class="text-xs text-text-muted">Secondary groups</p>
 									{#each [0, 1] as i}
 										<select
 											value={editSecondaryGroupIds[i] ?? ''}
+											aria-label={i === 0 ? 'First edited secondary muscle group' : 'Second edited secondary muscle group'}
 											onchange={(e) => {
 												const val = (e.target as HTMLSelectElement).value;
 												const updated = [...editSecondaryGroupIds];

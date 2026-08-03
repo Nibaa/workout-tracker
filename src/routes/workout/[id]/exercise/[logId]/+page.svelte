@@ -4,10 +4,12 @@
 	import { page } from '$app/stores';
 	import {
 		getSetLogs, updateSetLog, finishExerciseLog, getExercise, getSettings,
-		getIncrementProfile, getNextWeightInProfile, getPrevWeightInProfile, getLastPerformance
+		getIncrementProfile, getNextWeightInProfile, getPrevWeightInProfile, getLastPerformance,
+		isMyoRepSlot, getExerciseLogs, getExerciseSlots, createExerciseLog, createSetLog,
+		planExerciseTargets, getAlternatingExerciseId, updateExerciseSlot
 	} from '$lib/store';
 	import { db } from '$lib/db';
-	import type { ExerciseLog, SetLog, Exercise, ExerciseSlot, Settings, IncrementProfile } from '$lib/types';
+	import type { ExerciseLog, SetLog, Exercise, ExerciseSlot, Settings, IncrementProfile, WorkoutSession } from '$lib/types';
 
 	let exerciseLog = $state<ExerciseLog | undefined>();
 	let exercise = $state<Exercise | undefined>();
@@ -32,8 +34,8 @@
 	let inputWeight = $state(0);
 	let inputReps = $state<number | undefined>();
 
-	const sessionId = $derived($page.params.id);
-	const logId = $derived($page.params.logId);
+	const sessionId = $derived($page.params.id ?? '');
+	const logId = $derived($page.params.logId ?? '');
 
 	$effect(() => {
 		if (sets.length > 0 && currentSetIndex < sets.length) {
@@ -90,6 +92,7 @@
 		if (inputReps === undefined || inputReps < 0) return;
 
 		const set = sets[currentSetIndex];
+		const completedSetIndex = currentSetIndex;
 		await updateSetLog(set.id, {
 			actualWeight: inputWeight,
 			actualReps: inputReps,
@@ -102,6 +105,18 @@
 			actualReps: inputReps,
 			completed: true
 		};
+
+		const nextSupersetLogId = await getNextSupersetLogId(completedSetIndex);
+		if (nextSupersetLogId && nextSupersetLogId !== exerciseLog?.id) {
+			goto(`/workout/${sessionId}/exercise/${nextSupersetLogId}`);
+			return;
+		}
+
+		if (nextSupersetLogId === exerciseLog?.id) {
+			const firstIncomplete = sets.findIndex(candidate => !candidate.completed);
+			currentSetIndex = firstIncomplete >= 0 ? firstIncomplete : sets.length - 1;
+			return;
+		}
 
 		// Move to next set or finish
 		if (currentSetIndex < sets.length - 1) {
@@ -129,7 +144,7 @@
 	function startRestTimer() {
 		restActive = true;
 		// Use exercise-specific rest or default
-		restRemaining = settings.defaultRestSeconds;
+		restRemaining = slot?.restSeconds ?? settings.defaultRestSeconds;
 		clearInterval(restTimer);
 		restTimer = setInterval(() => {
 			restRemaining--;
@@ -198,12 +213,17 @@
 	async function finalizeExercise() {
 		if (!exerciseLog) return;
 		await finishExerciseLog(exerciseLog.id);
+		const nextSupersetLogId = await getNextSupersetLogId();
+		if (nextSupersetLogId && nextSupersetLogId !== exerciseLog.id) {
+			goto(`/workout/${sessionId}/exercise/${nextSupersetLogId}`);
+			return;
+		}
 		goto(`/workout/${sessionId}`);
 	}
 
 	async function finishExercise() {
 		if (!exerciseLog) return;
-		if (allDone && hasPerformanceDrop()) {
+		if (allDone && !isMyoRep && hasPerformanceDrop()) {
 			adjustedTargetReps = getSuggestedAdjustedTargetReps();
 			showTargetAdjustmentPrompt = true;
 			return;
@@ -229,9 +249,145 @@
 		return `${m}:${String(s).padStart(2, '0')}`;
 	}
 
+	function getSetLabel(setIndex: number): string {
+		if (!slot || !isMyoRepSlot(slot)) {
+			return `Set ${sets[setIndex]?.setNumber ?? setIndex + 1}`;
+		}
+
+		if (setIndex === 0) {
+			return 'Activation set';
+		}
+
+		const totalMiniSets = Math.max(1, sets.length - 1);
+		return `Mini-set ${setIndex} of ${totalMiniSets}`;
+	}
+
+	function getRepsTargetLabel(setIndex: number): string {
+		if (!slot || !isMyoRepSlot(slot)) {
+			return 'Session target';
+		}
+
+		return setIndex === 0 ? 'Activation target' : 'Mini-set target';
+	}
+
+	function getMyoRepSummary(): string | null {
+		if (!slot || !isMyoRepSlot(slot)) return null;
+		const activationTarget = slot.myoActivationTargetReps ?? sets[0]?.targetReps;
+		const miniSetTarget = slot.myoMiniSetTargetReps ?? sets[1]?.targetReps;
+		const miniSetCount = slot.myoMiniSetCount ?? Math.max(1, sets.length - 1);
+
+		if (!activationTarget || !miniSetTarget) return 'Myoreps';
+		return `${activationTarget} activation + ${miniSetTarget}×${miniSetCount} mini-sets`;
+	}
+
+	function getSupersetSummary(): string | null {
+		if (!slot?.supersetGroup) return null;
+		return 'Superset exercise';
+	}
+
+	async function getNextSupersetLogId(completedSetIndex?: number): Promise<string | null> {
+		if (!exerciseLog?.slotId || !slot?.supersetGroup || !sessionId) {
+			return null;
+		}
+
+		const workoutSession = await db.workoutSessions.get(sessionId);
+		if (!workoutSession) {
+			return null;
+		}
+
+		const supersetSlots = (await getExerciseSlots(workoutSession.splitDayId))
+			.filter(candidate => candidate.supersetGroup === slot?.supersetGroup)
+			.sort((left, right) => left.order - right.order);
+
+		if (supersetSlots.length < 2) {
+			return null;
+		}
+
+		const currentSlotIndex = supersetSlots.findIndex(candidate => candidate.id === slot?.id);
+		if (currentSlotIndex < 0) {
+			return null;
+		}
+
+		const logs = await getExerciseLogs(workoutSession.id);
+
+		if (completedSetIndex !== undefined) {
+			for (let offset = 1; offset < supersetSlots.length; offset++) {
+				const candidateSlot = supersetSlots[(currentSlotIndex + offset) % supersetSlots.length];
+				const candidateLog = await findOrCreateSupersetLog(candidateSlot, workoutSession, logs);
+				const candidateSets = await getSetLogs(candidateLog.id);
+				const candidateSet = candidateSets[completedSetIndex];
+				if (candidateSet && !candidateSet.completed) {
+					return candidateLog.id;
+				}
+			}
+		}
+
+		for (const candidateSlot of supersetSlots) {
+			const candidateLog = await findOrCreateSupersetLog(candidateSlot, workoutSession, logs);
+			const candidateSets = await getSetLogs(candidateLog.id);
+			if (candidateSets.some(candidate => !candidate.completed)) {
+				return candidateLog.id;
+			}
+		}
+
+		return null;
+	}
+
+	async function findOrCreateSupersetLog(
+		candidateSlot: ExerciseSlot,
+		workoutSession: WorkoutSession,
+		existingLogs: ExerciseLog[]
+	): Promise<ExerciseLog> {
+		const existingLog = existingLogs.find(candidate => candidate.slotId === candidateSlot.id);
+		if (existingLog) {
+			return existingLog;
+		}
+
+		const exerciseId = candidateSlot.type === 'alternating'
+			? await getAlternatingExerciseId(candidateSlot, workoutSession.splitDayId)
+			: candidateSlot.exerciseId;
+		const splitDay = await db.splitDays.get(workoutSession.splitDayId);
+		const log = await createExerciseLog({
+			sessionId: workoutSession.id,
+			exerciseId,
+			slotId: candidateSlot.id,
+			order: getNextSupersetLogOrder(existingLogs)
+		});
+		const plannedSets = await planExerciseTargets(
+			candidateSlot,
+			exerciseId,
+			workoutSession.splitDayId,
+			splitDay?.defaultRepTarget,
+			settings
+		);
+
+		for (const plannedSet of plannedSets) {
+			await createSetLog({
+				exerciseLogId: log.id,
+				setNumber: plannedSet.setNumber,
+				targetWeight: plannedSet.targetWeight,
+				targetReps: plannedSet.targetReps,
+				isWarmup: false,
+				completed: false
+			});
+		}
+
+		if (candidateSlot.deloadWeight !== undefined) {
+			await updateExerciseSlot(candidateSlot.id, { deloadWeight: undefined, deloadReps: undefined });
+		}
+
+		existingLogs.push(log);
+		return log;
+	}
+
+	function getNextSupersetLogOrder(existingLogs: ExerciseLog[]): number {
+		return existingLogs.reduce((maxOrder, candidate) => Math.max(maxOrder, candidate.order), -1) + 1;
+	}
+
 	const completedCount = $derived(sets.filter(s => s.completed).length);
 	const currentSet = $derived(sets[currentSetIndex]);
 	const allDone = $derived(sets.length > 0 && sets.every(s => s.completed));
+	const isMyoRep = $derived(slot ? isMyoRepSlot(slot) : false);
 </script>
 
 <div class="max-w-lg mx-auto px-4 pt-4">
@@ -251,6 +407,12 @@
 				{#if exercise?.notes}
 					<p class="text-text-secondary text-xs mt-1">{exercise.notes}</p>
 				{/if}
+				{#if getMyoRepSummary()}
+					<p class="text-text-secondary text-xs mt-1">{getMyoRepSummary()}</p>
+				{/if}
+				{#if getSupersetSummary()}
+					<p class="text-text-secondary text-xs mt-1">{getSupersetSummary()}</p>
+				{/if}
 			</div>
 			<button
 				onclick={finishExercise}
@@ -267,11 +429,12 @@
 					Keep the current session target for next time, or reset it to a new default.
 				</p>
 				<div class="mb-3">
-					<label class="block text-xs text-text-secondary mb-2">New session target reps</label>
+					<p class="block text-xs text-text-secondary mb-2">New session target reps</p>
 					<input
 						type="number"
 						bind:value={adjustedTargetReps}
 						min="1"
+						aria-label="New session target reps"
 						class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
 					/>
 					<p class="text-xs text-text-muted mt-1">Suggested reset: {getSuggestedAdjustedTargetReps()} reps</p>
@@ -310,7 +473,7 @@
 				onclick={startRestTimer}
 				class="w-full bg-dark-card text-accent py-3 rounded-xl border border-dark-border hover:border-accent transition-colors mb-4 text-sm font-medium"
 			>
-				Start Rest Timer ({settings.defaultRestSeconds}s)
+				Start Rest Timer ({slot?.restSeconds ?? settings.defaultRestSeconds}s)
 			</button>
 		{/if}
 
@@ -321,30 +484,32 @@
 					{#if set.completed}
 						<div class="p-3 bg-dark-surface rounded-lg border border-dark-border space-y-2">
 							<div class="flex items-center justify-between gap-3">
-								<span class="text-sm font-medium">Set {set.setNumber}</span>
+								<span class="text-sm font-medium">{getSetLabel(i)}</span>
 								<button onclick={() => handleToggleSetCompleted(i)} class="text-xs text-warning">Mark unfinished</button>
 							</div>
 							<div class="flex items-center gap-2">
 								{#if !isBodyweight}
 									<div class="flex-1">
-										<label class="text-[10px] text-text-muted block">kg</label>
+										<span class="text-[10px] text-text-muted block">kg</span>
 										<input
 											type="number"
 											value={set.actualWeight ?? set.targetWeight}
 											onchange={(e) => handleUpdateCompletedSet(i, 'actualWeight', Number(e.currentTarget.value))}
 											step="0.5"
 											min="0"
+											aria-label={`Completed ${getSetLabel(i)} weight in kilograms`}
 											class="w-full bg-dark-card text-sm text-center py-1 rounded border border-dark-border focus:border-accent focus:outline-none"
 										/>
 									</div>
 								{/if}
 								<div class="flex-1">
-									<label class="text-[10px] text-text-muted block">reps</label>
+									<span class="text-[10px] text-text-muted block">reps</span>
 									<input
 										type="number"
 										value={set.actualReps ?? set.targetReps}
 										onchange={(e) => handleUpdateCompletedSet(i, 'actualReps', Number(e.currentTarget.value))}
 										min="0"
+										aria-label={`Completed ${getSetLabel(i)} reps`}
 										class="w-full bg-dark-card text-sm text-center py-1 rounded border border-dark-border focus:border-accent focus:outline-none"
 									/>
 								</div>
@@ -358,12 +523,12 @@
 		<!-- Current Set Input -->
 		{#if !allDone && currentSet}
 			<div class="bg-dark-card rounded-xl p-5 border border-dark-border">
-				<h3 class="text-sm text-text-muted mb-4">Set {currentSet.setNumber} of {sets.length}</h3>
+				<h3 class="text-sm text-text-muted mb-4">{getSetLabel(currentSetIndex)} of {sets.length}</h3>
 
 				<!-- Weight Input -->
 				{#if !isBodyweight}
 					<div class="mb-4">
-						<label class="block text-xs text-text-secondary mb-2">Weight (kg)</label>
+						<p class="block text-xs text-text-secondary mb-2">Weight (kg)</p>
 						<div class="flex items-center gap-3">
 							<button
 								onclick={() => {
@@ -381,6 +546,7 @@
 								bind:value={inputWeight}
 								step="0.5"
 								min="0"
+								aria-label={`${getSetLabel(currentSetIndex)} weight in kilograms`}
 								class="flex-1 bg-dark-surface text-center text-2xl font-bold py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
 							/>
 							<button
@@ -396,14 +562,14 @@
 							>+</button>
 						</div>
 						{#if currentSet.targetWeight > 0}
-							<p class="text-xs text-text-muted text-center mt-1">Session target: {currentSet.targetWeight}kg</p>
+							<p class="text-xs text-text-muted text-center mt-1">{getRepsTargetLabel(currentSetIndex)} weight: {currentSet.targetWeight}kg</p>
 						{/if}
 					</div>
 				{/if}
 
 				<!-- Reps Input -->
 				<div class="mb-5">
-					<label class="block text-xs text-text-secondary mb-2">Reps</label>
+					<p class="block text-xs text-text-secondary mb-2">Reps</p>
 					<div class="flex items-center gap-3">
 						<button
 							onclick={() => { if (inputReps !== undefined) inputReps = Math.max(0, inputReps - 1); }}
@@ -414,6 +580,7 @@
 							bind:value={inputReps}
 							placeholder="reps"
 							min="0"
+							aria-label={`${getSetLabel(currentSetIndex)} reps`}
 							class="flex-1 bg-dark-surface text-center text-2xl font-bold py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none placeholder:text-text-muted"
 						/>
 						<button
@@ -421,7 +588,7 @@
 							class="w-12 h-12 bg-dark-surface rounded-lg text-xl font-bold text-text-secondary hover:text-text-primary transition-colors"
 						>+</button>
 					</div>
-					<p class="text-xs text-text-muted text-center mt-1">Session target: {currentSet.targetReps} reps</p>
+					<p class="text-xs text-text-muted text-center mt-1">{getRepsTargetLabel(currentSetIndex)}: {currentSet.targetReps} reps</p>
 				</div>
 
 				<button
@@ -451,7 +618,7 @@
 					{#if !set.completed && i > currentSetIndex}
 						<div class="flex items-center gap-3 p-2 text-text-muted text-xs">
 							<span class="w-6">○</span>
-							<span>Set {set.setNumber}: session target {set.targetWeight}kg × {set.targetReps} reps</span>
+							<span>{getSetLabel(i)}: session target {set.targetWeight}kg × {set.targetReps} reps</span>
 						</div>
 					{/if}
 				{/each}

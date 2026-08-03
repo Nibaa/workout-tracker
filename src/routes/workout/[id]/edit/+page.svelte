@@ -19,7 +19,7 @@
 	let sessionNotes = $state('');
 	let showDeleteConfirm = $state(false);
 
-	const sessionId = $derived($page.params.id);
+	const sessionId = $derived($page.params.id ?? '');
 
 	onMount(async () => {
 		settings = getSettings();
@@ -139,12 +139,13 @@
 
 		<!-- Session Notes -->
 		<div class="bg-dark-card rounded-xl p-4 mb-4 border border-dark-border">
-			<label class="block text-xs text-text-secondary mb-2">Session Notes</label>
+			<p class="block text-xs text-text-secondary mb-2">Session Notes</p>
 			<textarea
 				bind:value={sessionNotes}
 				onblur={handleSaveNotes}
 				placeholder="Add notes about this workout..."
 				rows="2"
+				aria-label="Workout session notes"
 				class="w-full bg-dark-surface text-sm rounded-lg border border-dark-border p-2 focus:border-accent focus:outline-none resize-none"
 			></textarea>
 		</div>
@@ -176,25 +177,27 @@
 
 							<div class="flex-1 flex items-center gap-2">
 								<div class="flex-1">
-									<label class="text-[10px] text-text-muted block">kg</label>
+									<span class="text-[10px] text-text-muted block">kg</span>
 									<input
 										type="number"
 										value={set.actualWeight ?? set.targetWeight}
 										onchange={(e) => handleUpdateSet(logIndex, setIndex, 'actualWeight', Number(e.currentTarget.value))}
 										step="0.5"
 										min="0"
+										aria-label={`Exercise ${logIndex + 1} set ${set.setNumber} weight in kilograms`}
 										class="w-full bg-dark-card text-sm text-center py-1 rounded border border-dark-border focus:border-accent focus:outline-none"
 									/>
 								</div>
 								<span class="text-text-muted text-xs mt-3">×</span>
 								<div class="flex-1">
-									<label class="text-[10px] text-text-muted block">reps</label>
+									<span class="text-[10px] text-text-muted block">reps</span>
 									<input
 										type="number"
 										value={set.actualReps}
 										onchange={(e) => handleUpdateSet(logIndex, setIndex, 'actualReps', Number(e.currentTarget.value))}
 										placeholder="–"
 										min="0"
+										aria-label={`Exercise ${logIndex + 1} set ${set.setNumber} reps`}
 										class="w-full bg-dark-card text-sm text-center py-1 rounded border border-dark-border focus:border-accent focus:outline-none"
 									/>
 								</div>

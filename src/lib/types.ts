@@ -2,6 +2,8 @@ export type Weekday = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday'
 
 export type ExerciseSlotType = 'core' | 'alternating' | 'optional';
 
+export type ExerciseProgressionMode = 'standard' | 'myoreps';
+
 export interface Split {
 	id: string;
 	name: string;
@@ -58,6 +60,8 @@ export interface ExerciseSlot {
 	splitDayId: string;
 	order: number;
 	type: ExerciseSlotType;
+	/** How this slot's work sets are planned and progressed */
+	progressionMode?: ExerciseProgressionMode;
 	/** Primary exercise ID */
 	exerciseId: string;
 	/** Alternate exercise IDs (for 'alternating' type — any number of alternatives) */
@@ -69,6 +73,12 @@ export interface ExerciseSlot {
 	targetSets: number;
 	/** Session target reps used when there is no recent workout history */
 	targetReps?: number;
+	/** First-set target reps for myoreps slots */
+	myoActivationTargetReps?: number;
+	/** Target reps for each mini-set in myoreps slots */
+	myoMiniSetTargetReps?: number;
+	/** Number of mini-sets to perform after the activation set */
+	myoMiniSetCount?: number;
 	restSeconds?: number;
 	/** Custom weight increments for this slot (e.g., [1, 1.5, 2, 2.5]) */
 	weightIncrements?: number[];

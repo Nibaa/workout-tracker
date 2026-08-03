@@ -10,7 +10,7 @@
 	} from '$lib/store';
 	import type {
 		Split, SplitDay, ExerciseSlot, Exercise, MuscleGroup, ExerciseSlotType, IncrementProfile,
-		Settings, ExerciseSlotExerciseState
+		Settings, ExerciseSlotExerciseState, ExerciseProgressionMode
 	} from '$lib/types';
 	import { WEEKDAYS, WEEKDAY_LABELS, type Weekday } from '$lib/types';
 
@@ -44,12 +44,17 @@
 	let newSlotExerciseId = $state('');
 	let newSlotAlternateIds = $state<string[]>([]);
 	let newSlotType = $state<ExerciseSlotType>('core');
+	let newSlotProgressionMode = $state<ExerciseProgressionMode>('standard');
 	let newSlotSets = $state(3);
 	let newSlotReps = $state<number | undefined>();
+	let newSlotMyoActivationTargetReps = $state<number | undefined>();
+	let newSlotMyoMiniSetTargetReps = $state<number | undefined>(4);
+	let newSlotMyoMiniSetCount = $state(4);
 	let newSlotRest = $state<number | undefined>();
 	let newSlotProfileId = $state('');
 	let newSlotWeightIncrements = $state('');
 	let newSlotRepTarget = $state<number | undefined>();
+	let newSlotSupersetSelection = $state('');
 	let newSlotInitialWeight = $state<number | undefined>();
 	let newSlotInitialReps = $state<number | undefined>();
 	let newSlotUsePerSet = $state(false);
@@ -57,12 +62,17 @@
 
 	// Edit slot
 	let editingSlotId = $state<string | null>(null);
+	let editSlotProgressionMode = $state<ExerciseProgressionMode>('standard');
 	let editSlotSets = $state(3);
 	let editSlotReps = $state<number | undefined>();
+	let editSlotMyoActivationTargetReps = $state<number | undefined>();
+	let editSlotMyoMiniSetTargetReps = $state<number | undefined>(4);
+	let editSlotMyoMiniSetCount = $state(4);
 	let editSlotRest = $state<number | undefined>();
 	let editSlotProfileId = $state('');
 	let editSlotWeightIncrements = $state('');
 	let editSlotRepTarget = $state<number | undefined>();
+	let editSlotSupersetSelection = $state('');
 	let editSlotInitialWeight = $state<number | undefined>();
 	let editSlotInitialReps = $state<number | undefined>();
 	let editSlotUsePerSet = $state(false);
@@ -77,6 +87,7 @@
 	// Edit name
 	let editingName = $state(false);
 	let editName = $state('');
+	const NEW_SUPERSET_SELECTION = '__new__';
 
 	onMount(async () => {
 		allExercises = await getExercises();
@@ -145,19 +156,26 @@
 		const increments = newSlotWeightIncrements
 			? newSlotWeightIncrements.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
 			: undefined;
+		const progressionMode = newSlotProgressionMode;
+		const myoMiniSetCount = Math.max(1, newSlotMyoMiniSetCount);
 
 		await createExerciseSlot({
 			splitDayId: dayId,
 			order: day.slots.length,
 			type: newSlotType,
+			progressionMode,
 			exerciseId: newSlotExerciseId,
 			alternateExerciseIds: altIds?.length ? altIds : undefined,
-			targetSets: newSlotSets,
-			targetReps: newSlotReps,
+			supersetGroup: resolveSupersetGroup(newSlotSupersetSelection),
+			targetSets: progressionMode === 'myoreps' ? myoMiniSetCount + 1 : newSlotSets,
+			targetReps: progressionMode === 'myoreps' ? undefined : newSlotReps,
+			myoActivationTargetReps: progressionMode === 'myoreps' ? Math.max(1, newSlotMyoActivationTargetReps ?? settings.defaultRepTarget) : undefined,
+			myoMiniSetTargetReps: progressionMode === 'myoreps' ? Math.max(1, newSlotMyoMiniSetTargetReps ?? 4) : undefined,
+			myoMiniSetCount: progressionMode === 'myoreps' ? myoMiniSetCount : undefined,
 			restSeconds: newSlotRest,
 			incrementProfileId: newSlotProfileId || undefined,
 			weightIncrements: increments?.length ? increments : undefined,
-			repTarget: newSlotRepTarget,
+			repTarget: progressionMode === 'myoreps' ? undefined : newSlotRepTarget,
 			initialWeight: newSlotInitialWeight,
 			initialReps: newSlotInitialReps,
 			initialSets: newSlotUsePerSet && newSlotInitialSets.length > 0 ? newSlotInitialSets : undefined
@@ -167,12 +185,17 @@
 		newSlotExerciseId = '';
 		newSlotAlternateIds = [];
 		newSlotType = 'core';
+		newSlotProgressionMode = 'standard';
 		newSlotSets = 3;
 		newSlotReps = undefined;
+		newSlotMyoActivationTargetReps = undefined;
+		newSlotMyoMiniSetTargetReps = 4;
+		newSlotMyoMiniSetCount = 4;
 		newSlotRest = undefined;
 		newSlotProfileId = '';
 		newSlotWeightIncrements = '';
 		newSlotRepTarget = undefined;
+		newSlotSupersetSelection = '';
 		newSlotInitialWeight = undefined;
 		newSlotInitialReps = undefined;
 		newSlotUsePerSet = false;
@@ -187,12 +210,17 @@
 
 	function startEditSlot(slot: ExerciseSlot) {
 		editingSlotId = slot.id;
+		editSlotProgressionMode = slot.progressionMode ?? 'standard';
 		editSlotSets = slot.targetSets;
 		editSlotReps = slot.targetReps;
+		editSlotMyoActivationTargetReps = slot.myoActivationTargetReps ?? slot.targetReps ?? settings.defaultRepTarget;
+		editSlotMyoMiniSetTargetReps = slot.myoMiniSetTargetReps ?? 4;
+		editSlotMyoMiniSetCount = slot.myoMiniSetCount ?? Math.max(1, slot.targetSets - 1);
 		editSlotRest = slot.restSeconds;
 		editSlotProfileId = slot.incrementProfileId ?? '';
 		editSlotWeightIncrements = slot.weightIncrements?.join(', ') ?? '';
 		editSlotRepTarget = slot.repTarget;
+		editSlotSupersetSelection = slot.supersetGroup ?? '';
 		editSlotInitialWeight = slot.initialWeight;
 		editSlotInitialReps = slot.initialReps;
 		editSlotUsePerSet = !!slot.initialSets && slot.initialSets.length > 0;
@@ -210,13 +238,19 @@
 		const increments = editSlotWeightIncrements
 			? editSlotWeightIncrements.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
 			: undefined;
+		const myoMiniSetCount = Math.max(1, editSlotMyoMiniSetCount);
 		const updates: Partial<Omit<ExerciseSlot, 'id'>> = {
-			targetSets: editSlotSets,
-			targetReps: editSlotReps,
+			progressionMode: editSlotProgressionMode,
+			targetSets: editSlotProgressionMode === 'myoreps' ? myoMiniSetCount + 1 : editSlotSets,
+			targetReps: editSlotProgressionMode === 'myoreps' ? undefined : editSlotReps,
+			myoActivationTargetReps: editSlotProgressionMode === 'myoreps' ? Math.max(1, editSlotMyoActivationTargetReps ?? settings.defaultRepTarget) : undefined,
+			myoMiniSetTargetReps: editSlotProgressionMode === 'myoreps' ? Math.max(1, editSlotMyoMiniSetTargetReps ?? 4) : undefined,
+			myoMiniSetCount: editSlotProgressionMode === 'myoreps' ? myoMiniSetCount : undefined,
 			restSeconds: editSlotRest,
 			incrementProfileId: editSlotProfileId || undefined,
 			weightIncrements: increments?.length ? increments : undefined,
-			repTarget: editSlotRepTarget
+			repTarget: editSlotProgressionMode === 'myoreps' ? undefined : editSlotRepTarget,
+			supersetGroup: resolveSupersetGroup(editSlotSupersetSelection)
 		};
 
 		if (slot.type === 'alternating' && getAllExerciseIdsForSlot(slot).length > 1) {
@@ -262,8 +296,9 @@
 	function serializeExerciseInitialStates(
 		exerciseStates: typeof editSlotExerciseStates
 	): Record<string, ExerciseSlotExerciseState> | undefined {
-		const entries = Object.entries(exerciseStates)
-			.map(([exerciseId, exerciseState]) => {
+		const entries: Array<[string, ExerciseSlotExerciseState]> = [];
+
+		for (const [exerciseId, exerciseState] of Object.entries(exerciseStates)) {
 				const initialSets = exerciseState.usePerSet && exerciseState.initialSets.length > 0
 					? exerciseState.initialSets.map(set => ({ ...set }))
 					: undefined;
@@ -271,17 +306,58 @@
 					|| exerciseState.initialReps !== undefined
 					|| !!initialSets;
 
-				if (!hasState) return null;
+				if (!hasState) continue;
 
-				return [exerciseId, {
+				entries.push([exerciseId, {
 					initialWeight: exerciseState.initialWeight,
 					initialReps: exerciseState.initialReps,
 					initialSets
-				}] as const;
-			})
-			.filter((entry): entry is readonly [string, ExerciseSlotExerciseState] => entry !== null);
+				}]);
+		}
 
 		return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+	}
+
+	function resolveSupersetGroup(selection: string): string | undefined {
+		if (!selection) return undefined;
+		if (selection === NEW_SUPERSET_SELECTION) {
+			return `superset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		}
+
+		return selection;
+	}
+
+	function getSupersetGroupKeys(day: typeof days[number]): string[] {
+		return [...new Set(day.slots.map(slot => slot.supersetGroup).filter((group): group is string => !!group))];
+	}
+
+	function getSupersetGroupLabel(day: typeof days[number], groupKey: string): string {
+		const groupKeys = getSupersetGroupKeys(day);
+		const index = groupKeys.indexOf(groupKey);
+		return `Superset ${index >= 0 ? index + 1 : groupKeys.length + 1}`;
+	}
+
+	function getSupersetGroupOptions(day: typeof days[number], currentSlotId?: string): Array<{ key: string; label: string }> {
+		return getSupersetGroupKeys(day).map(groupKey => {
+			const memberNames = day.slots
+				.filter(slot => slot.supersetGroup === groupKey && slot.id !== currentSlotId)
+				.map(slot => slot.exercise?.name ?? 'Unknown');
+			const label = getSupersetGroupLabel(day, groupKey);
+			return {
+				key: groupKey,
+				label: memberNames.length > 0 ? `${label} · ${memberNames.join(' + ')}` : label
+			};
+		});
+	}
+
+	function getSlotProgressionSummary(slot: ExerciseSlot): string | null {
+		if (slot.progressionMode !== 'myoreps') return null;
+		const activationTarget = slot.myoActivationTargetReps ?? slot.targetReps;
+		const miniSetTarget = slot.myoMiniSetTargetReps;
+		const miniSetCount = slot.myoMiniSetCount ?? Math.max(1, slot.targetSets - 1);
+
+		if (!activationTarget || !miniSetTarget) return 'Myoreps';
+		return `Myoreps ${activationTarget} + ${miniSetTarget}×${miniSetCount}`;
 	}
 
 	function addEditExerciseInitialSet(exerciseId: string) {
@@ -447,28 +523,89 @@
 									</div>
 
 									<div class="flex gap-2">
-										<div class="flex-1">
-											<label class="text-xs text-text-muted">Sets</label>
-											<input type="number" bind:value={editSlotSets} min="1" max="20"
-												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										{#each ['standard', 'myoreps'] as progressionMode}
+											<button
+												onclick={() => editSlotProgressionMode = progressionMode as ExerciseProgressionMode}
+												class="flex-1 py-1.5 rounded text-xs font-medium transition-colors capitalize
+													{editSlotProgressionMode === progressionMode ? 'bg-accent text-white' : 'bg-dark-card text-text-secondary'}"
+											>
+												{progressionMode}
+											</button>
+										{/each}
+									</div>
+
+									<div>
+										<p class="text-xs text-text-muted">Superset</p>
+										<select
+											bind:value={editSlotSupersetSelection}
+											aria-label="Edit slot superset"
+											class="w-full bg-dark-card text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
+										>
+											<option value="">None</option>
+											<option value={NEW_SUPERSET_SELECTION}>Create new superset</option>
+											{#each getSupersetGroupOptions(day, slot.id) as option}
+												<option value={option.key}>{option.label}</option>
+											{/each}
+										</select>
+									</div>
+
+									{#if editSlotProgressionMode === 'myoreps'}
+										<div class="grid grid-cols-3 gap-2">
+											<div>
+												<p class="text-xs text-text-muted">Activation reps</p>
+												<input type="number" bind:value={editSlotMyoActivationTargetReps} min="1" max="100"
+													aria-label="Edit slot myorep activation reps"
+													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+											</div>
+											<div>
+												<p class="text-xs text-text-muted">Mini-set reps</p>
+												<input type="number" bind:value={editSlotMyoMiniSetTargetReps} min="1" max="50"
+													aria-label="Edit slot myorep mini-set reps"
+													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+											</div>
+											<div>
+												<p class="text-xs text-text-muted">Mini-sets</p>
+												<input type="number" bind:value={editSlotMyoMiniSetCount} min="1" max="20"
+													aria-label="Edit slot myorep mini-set count"
+													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+											</div>
 										</div>
-										<div class="flex-1">
-											<label class="text-xs text-text-muted">Reps</label>
-											<input type="number" bind:value={editSlotReps} min="1" max="100" placeholder="default"
-												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
-										</div>
-										<div class="flex-1">
-											<label class="text-xs text-text-muted">Rest (s)</label>
+										<div>
+											<p class="text-xs text-text-muted">Rest (s)</p>
 											<input type="number" bind:value={editSlotRest} min="0" placeholder="default"
+												aria-label="Edit slot rest seconds"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+										<p class="text-xs text-text-muted">Graduates when the activation set hits its target and total mini-set reps hit the minimum.</p>
+									{:else}
+									<div class="flex gap-2">
+										<div class="flex-1">
+											<p class="text-xs text-text-muted">Sets</p>
+											<input type="number" bind:value={editSlotSets} min="1" max="20"
+												aria-label="Edit slot set count"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+										<div class="flex-1">
+											<p class="text-xs text-text-muted">Reps</p>
+											<input type="number" bind:value={editSlotReps} min="1" max="100" placeholder="default"
+												aria-label="Edit slot target reps"
+												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+										</div>
+										<div class="flex-1">
+											<p class="text-xs text-text-muted">Rest (s)</p>
+											<input type="number" bind:value={editSlotRest} min="0" placeholder="default"
+												aria-label="Edit slot rest seconds"
 												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 										</div>
 									</div>
+									{/if}
 
 									{#if profiles.length > 0}
 										<div>
-											<label class="text-xs text-text-muted">Weight profile</label>
+											<p class="text-xs text-text-muted">Weight profile</p>
 											<select
 												bind:value={editSlotProfileId}
+												aria-label="Edit slot weight profile"
 												class="w-full bg-dark-card text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
 											>
 												<option value="">None (use increments)</option>
@@ -479,18 +616,29 @@
 										</div>
 									{/if}
 
+									{#if editSlotProgressionMode !== 'myoreps'}
 									<div class="flex gap-2">
 										<div class="flex-1">
-											<label class="text-xs text-text-muted">Rep goal</label>
+											<p class="text-xs text-text-muted">Rep goal</p>
 											<input type="number" bind:value={editSlotRepTarget} min="1" placeholder={String(settings.defaultRepTarget)}
+												aria-label="Edit slot rep goal"
 												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 										</div>
 										<div class="flex-1">
-											<label class="text-xs text-text-muted">Weight increments</label>
+											<p class="text-xs text-text-muted">Weight increments</p>
 											<input type="text" bind:value={editSlotWeightIncrements} placeholder="e.g. 1, 1.5, 2"
+												aria-label="Edit slot weight increments"
 												class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 										</div>
 									</div>
+									{:else}
+									<div>
+										<p class="text-xs text-text-muted">Weight increments</p>
+										<input type="text" bind:value={editSlotWeightIncrements} placeholder="e.g. 1, 1.5, 2"
+											aria-label="Edit slot weight increments"
+											class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
+									</div>
+									{/if}
 
 									{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
 										<div class="space-y-3">
@@ -501,13 +649,15 @@
 													<p class="text-sm font-medium">{slot.exercise.name}</p>
 													<div class="flex gap-2">
 														<div class="flex-1">
-															<label class="text-xs text-text-muted">Current weight (kg)</label>
+															<p class="text-xs text-text-muted">Current weight (kg)</p>
 															<input type="number" bind:value={primaryState.initialWeight} placeholder="0" step="0.5"
+																aria-label={`${slot.exercise.name} current weight`}
 																class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 														</div>
 														<div class="flex-1">
-															<label class="text-xs text-text-muted">Current reps</label>
+															<p class="text-xs text-text-muted">Current reps</p>
 															<input type="number" bind:value={primaryState.initialReps} placeholder="8"
+																aria-label={`${slot.exercise.name} current reps`}
 																class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 														</div>
 													</div>
@@ -542,13 +692,15 @@
 														<p class="text-sm font-medium">{alt.name}</p>
 														<div class="flex gap-2">
 															<div class="flex-1">
-																<label class="text-xs text-text-muted">Current weight (kg)</label>
+																<p class="text-xs text-text-muted">Current weight (kg)</p>
 																<input type="number" bind:value={alternateState.initialWeight} placeholder="0" step="0.5"
+																	aria-label={`${alt.name} current weight`}
 																	class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 															</div>
 															<div class="flex-1">
-																<label class="text-xs text-text-muted">Current reps</label>
+																<p class="text-xs text-text-muted">Current reps</p>
 																<input type="number" bind:value={alternateState.initialReps} placeholder="8"
+																	aria-label={`${alt.name} current reps`}
 																	class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 															</div>
 														</div>
@@ -581,13 +733,15 @@
 									{:else}
 										<div class="flex gap-2">
 											<div class="flex-1">
-												<label class="text-xs text-text-muted">Current weight (kg)</label>
+												<p class="text-xs text-text-muted">Current weight (kg)</p>
 												<input type="number" bind:value={editSlotInitialWeight} placeholder="0" step="0.5"
+													aria-label="Edit slot current weight"
 													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 											</div>
 											<div class="flex-1">
-												<label class="text-xs text-text-muted">Current reps</label>
+												<p class="text-xs text-text-muted">Current reps</p>
 												<input type="number" bind:value={editSlotInitialReps} placeholder="8"
+													aria-label="Edit slot current reps"
 													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 											</div>
 										</div>
@@ -655,7 +809,11 @@
 										{#if slot.type !== 'core'} · <span class="capitalize">{slot.type}</span>{/if}
 										{#if slot.restSeconds} · {slot.restSeconds}s rest{/if}
 										{#if slot.repTarget} · {slot.repTarget} rep goal{/if}
+										{#if slot.supersetGroup} · {getSupersetGroupLabel(day, slot.supersetGroup)}{/if}
 									</div>
+									{#if getSlotProgressionSummary(slot)}
+										<div class="text-text-muted text-xs">{getSlotProgressionSummary(slot)}</div>
+									{/if}
 									{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
 										{#if slot.exercise}
 											{@const primarySummary = getExerciseCurrentSummary(slot, slot.exerciseId)}
@@ -696,13 +854,15 @@
 										<p class="text-xs text-warning">Next session will use these values instead of the progression.</p>
 										<div class="flex gap-2">
 											<div class="flex-1">
-												<label class="text-xs text-text-muted">Weight (kg)</label>
+												<p class="text-xs text-text-muted">Weight (kg)</p>
 												<input type="number" bind:value={deloadWeightValue} min="0" step="0.5"
+													aria-label="Deload weight"
 													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 											</div>
 											<div class="flex-1">
-												<label class="text-xs text-text-muted">Target reps</label>
+												<p class="text-xs text-text-muted">Target reps</p>
 												<input type="number" bind:value={deloadRepsValue} min="1" max="50"
+													aria-label="Deload target reps"
 													class="w-full bg-dark-card px-2 py-1.5 rounded border border-dark-border text-sm" />
 											</div>
 										</div>
@@ -760,6 +920,18 @@
 							{/each}
 						</div>
 
+						<div class="flex gap-2">
+							{#each ['standard', 'myoreps'] as progressionMode}
+								<button
+									onclick={() => newSlotProgressionMode = progressionMode as ExerciseProgressionMode}
+									class="flex-1 py-1.5 rounded text-xs font-medium transition-colors capitalize
+										{newSlotProgressionMode === progressionMode ? 'bg-accent text-white' : 'bg-dark-surface text-text-secondary'}"
+								>
+									{progressionMode}
+								</button>
+							{/each}
+						</div>
+
 						{#if newSlotType === 'alternating'}
 							<div class="space-y-2">
 								{#each newSlotAlternateIds as _, i}
@@ -790,30 +962,79 @@
 							</div>
 						{/if}
 
+						<div>
+							<p class="text-xs text-text-muted">Superset</p>
+							<select
+								bind:value={newSlotSupersetSelection}
+								aria-label="New slot superset"
+								class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border text-sm"
+							>
+								<option value="">None</option>
+								<option value={NEW_SUPERSET_SELECTION}>Create new superset</option>
+								{#each getSupersetGroupOptions(day) as option}
+									<option value={option.key}>{option.label}</option>
+								{/each}
+							</select>
+						</div>
+
+						{#if newSlotProgressionMode === 'myoreps'}
+							<div class="grid grid-cols-3 gap-2">
+								<div>
+									<p class="text-xs text-text-muted">Activation reps</p>
+									<input type="number" bind:value={newSlotMyoActivationTargetReps} min="1" max="100"
+										aria-label="New slot myorep activation reps"
+										class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+								</div>
+								<div>
+									<p class="text-xs text-text-muted">Mini-set reps</p>
+									<input type="number" bind:value={newSlotMyoMiniSetTargetReps} min="1" max="50"
+										aria-label="New slot myorep mini-set reps"
+										class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+								</div>
+								<div>
+									<p class="text-xs text-text-muted">Mini-sets</p>
+									<input type="number" bind:value={newSlotMyoMiniSetCount} min="1" max="20"
+										aria-label="New slot myorep mini-set count"
+										class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+								</div>
+							</div>
+							<div>
+								<p class="text-xs text-text-muted">Rest (s)</p>
+								<input type="number" bind:value={newSlotRest} min="0" placeholder="default"
+									aria-label="New slot rest seconds"
+									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+							</div>
+							<p class="text-xs text-text-muted">Graduates when the activation set hits its target and total mini-set reps hit the minimum.</p>
+						{:else}
 						<div class="flex gap-2">
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Sets</label>
+								<p class="text-xs text-text-muted">Sets</p>
 								<input type="number" bind:value={newSlotSets} min="1" max="20"
+									aria-label="New slot set count"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Reps (optional)</label>
+								<p class="text-xs text-text-muted">Reps (optional)</p>
 								<input type="number" bind:value={newSlotReps} min="1" max="100" placeholder="default"
+									aria-label="New slot target reps"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Rest (s)</label>
+								<p class="text-xs text-text-muted">Rest (s)</p>
 								<input type="number" bind:value={newSlotRest} min="0" placeholder="default"
+									aria-label="New slot rest seconds"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 						</div>
+						{/if}
 
 						<!-- Weight Profile -->
 						{#if profiles.length > 0}
 							<div>
-								<label class="text-xs text-text-muted">Weight profile</label>
+								<p class="text-xs text-text-muted">Weight profile</p>
 								<select
 									bind:value={newSlotProfileId}
+									aria-label="New slot weight profile"
 									class="w-full bg-dark-surface text-text-primary px-3 py-1.5 rounded border border-dark-border text-sm"
 								>
 									<option value="">None (use increments)</option>
@@ -824,29 +1045,42 @@
 							</div>
 						{/if}
 
+						{#if newSlotProgressionMode !== 'myoreps'}
 						<div class="flex gap-2">
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Rep goal</label>
+								<p class="text-xs text-text-muted">Rep goal</p>
 								<input type="number" bind:value={newSlotRepTarget} min="1" placeholder={String(settings.defaultRepTarget)}
+									aria-label="New slot rep goal"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Weight increments</label>
+								<p class="text-xs text-text-muted">Weight increments</p>
 								<input type="text" bind:value={newSlotWeightIncrements} placeholder="e.g. 1, 1.5, 2"
+									aria-label="New slot weight increments"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 						</div>
+						{:else}
+						<div>
+							<p class="text-xs text-text-muted">Weight increments</p>
+							<input type="text" bind:value={newSlotWeightIncrements} placeholder="e.g. 1, 1.5, 2"
+								aria-label="New slot weight increments"
+								class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
+						</div>
+						{/if}
 
 						<!-- Initial Weight/Reps -->
 						<div class="flex gap-2">
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Current weight (kg)</label>
+								<p class="text-xs text-text-muted">Current weight (kg)</p>
 								<input type="number" bind:value={newSlotInitialWeight} placeholder="0" step="0.5"
+									aria-label="New slot current weight"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 							<div class="flex-1">
-								<label class="text-xs text-text-muted">Current reps</label>
+								<p class="text-xs text-text-muted">Current reps</p>
 								<input type="number" bind:value={newSlotInitialReps} placeholder="8"
+									aria-label="New slot current reps"
 									class="w-full bg-dark-surface px-2 py-1.5 rounded border border-dark-border text-sm" />
 							</div>
 						</div>
@@ -896,7 +1130,7 @@
 					</div>
 				{:else}
 					<button
-						onclick={() => addingSlotForDay = day.id}
+						onclick={() => { addingSlotForDay = day.id; newSlotProgressionMode = 'standard'; newSlotSupersetSelection = ''; newSlotMyoActivationTargetReps = day.defaultRepTarget ?? settings.defaultRepTarget; newSlotMyoMiniSetTargetReps = 4; newSlotMyoMiniSetCount = 4; }}
 						class="w-full text-accent text-sm py-2 rounded-lg border border-dashed border-dark-border hover:border-accent transition-colors"
 					>
 						+ Add Exercise
@@ -925,8 +1159,9 @@
 					</select>
 				{/if}
 				<div class="mb-3">
-					<label class="text-xs text-text-muted">Default rep goal (optional, overrides global)</label>
+					<p class="text-xs text-text-muted">Default rep goal (optional, overrides global)</p>
 					<input type="number" bind:value={newDayRepTarget} min="1" max="100" placeholder="Use global default"
+						aria-label="Default rep goal for new split day"
 						class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border" />
 				</div>
 				<div class="flex gap-2">

@@ -264,19 +264,22 @@
 				<h3 class="text-sm font-semibold text-warning">Log Break</h3>
 				<div class="flex gap-2">
 					<div class="flex-1">
-						<label class="text-xs text-text-muted">Start</label>
+						<p class="text-xs text-text-muted">Start</p>
 						<input type="date" bind:value={breakStartDate}
+							aria-label="Break start date"
 							class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border text-sm" />
 					</div>
 					<div class="flex-1">
-						<label class="text-xs text-text-muted">End</label>
+						<p class="text-xs text-text-muted">End</p>
 						<input type="date" bind:value={breakEndDate}
+							aria-label="Break end date"
 							class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border text-sm" />
 					</div>
 				</div>
 				<div>
-					<label class="text-xs text-text-muted">Reason</label>
+					<p class="text-xs text-text-muted">Reason</p>
 					<select bind:value={breakReason}
+						aria-label="Break reason"
 						class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border text-sm">
 						<option value="vacation">Vacation</option>
 						<option value="illness">Illness</option>

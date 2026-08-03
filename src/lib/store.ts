@@ -330,6 +330,31 @@ export interface PlannedExerciseSet {
 	targetReps: number;
 }
 
+export function isMyoRepSlot(slot: ExerciseSlot): boolean {
+	return slot.progressionMode === 'myoreps';
+}
+
+export function getMyoRepMiniSetCount(slot: ExerciseSlot): number {
+	if (!isMyoRepSlot(slot)) return 0;
+	return Math.max(1, slot.myoMiniSetCount ?? Math.max(0, slot.targetSets - 1) ?? 3);
+}
+
+export function getTargetSetCountForSlot(slot: ExerciseSlot): number {
+	return isMyoRepSlot(slot) ? getMyoRepMiniSetCount(slot) + 1 : slot.targetSets;
+}
+
+export function getPlannedTargetRepsForSlot(slot: ExerciseSlot, repGoal: number): number[] {
+	if (!isMyoRepSlot(slot)) {
+		return Array.from({ length: slot.targetSets }, () => getFallbackTargetReps(slot, repGoal));
+	}
+
+	const activationTarget = Math.max(1, slot.myoActivationTargetReps ?? slot.targetReps ?? repGoal);
+	const miniSetTarget = Math.max(1, slot.myoMiniSetTargetReps ?? Math.min(activationTarget, 4));
+	const miniSetCount = getMyoRepMiniSetCount(slot);
+
+	return [activationTarget, ...Array.from({ length: miniSetCount }, () => miniSetTarget)];
+}
+
 function getFallbackTargetReps(slot: ExerciseSlot, repGoal: number): number {
 	const fallback = slot.targetReps ?? repGoal - 4;
 	return fallback < 1 ? 1 : fallback;
@@ -376,6 +401,7 @@ export async function planExerciseTargets(
 	const exercise = await getExercise(exerciseId);
 	const repGoal = slot.repTarget ?? splitDayRepTarget ?? settings.defaultRepTarget;
 	const increment = settings.defaultWeightIncrement;
+	const targetRepsBySet = getPlannedTargetRepsForSlot(slot, repGoal);
 
 	let profile: IncrementProfile | undefined;
 	if (slot.incrementProfileId) {
@@ -385,11 +411,11 @@ export async function planExerciseTargets(
 	// Deload override: bypass progression and use specified values for next session only
 	if (slot.deloadWeight !== undefined) {
 		const targetWeight = exercise?.isBodyweight ? 0 : slot.deloadWeight;
-		const targetReps = slot.deloadReps ?? 6;
-		return Array.from({ length: slot.targetSets }, (_, index) => ({
+		const targetReps = slot.deloadReps ?? (targetRepsBySet[0] ?? 6);
+		return Array.from({ length: getTargetSetCountForSlot(slot) }, (_, index) => ({
 			setNumber: index + 1,
 			targetWeight,
-			targetReps
+			targetReps: index === 0 ? targetReps : (isMyoRepSlot(slot) ? (slot.myoMiniSetTargetReps ?? targetReps) : targetReps)
 		}));
 	}
 
@@ -399,6 +425,7 @@ export async function planExerciseTargets(
 
 	if (last && last.sets.length > 0) {
 		const progression = calculateProgression(
+			slot,
 			last.sets,
 			repGoal,
 			increment,
@@ -406,7 +433,7 @@ export async function planExerciseTargets(
 			profile
 		);
 
-		for (let index = 0; index < slot.targetSets; index++) {
+		for (let index = 0; index < getTargetSetCountForSlot(slot); index++) {
 			let targetWeight: number;
 			let targetReps: number;
 
@@ -431,16 +458,20 @@ export async function planExerciseTargets(
 		return plannedSets;
 	}
 
-	for (let index = 0; index < slot.targetSets; index++) {
+	for (let index = 0; index < getTargetSetCountForSlot(slot); index++) {
 		let targetWeight = 0;
-		let targetReps = getFallbackTargetReps(slot, repGoal);
+		let targetReps = targetRepsBySet[index] ?? targetRepsBySet[targetRepsBySet.length - 1] ?? getFallbackTargetReps(slot, repGoal);
 
 		if (initialState.initialSets && initialState.initialSets[index]) {
 			targetWeight = initialState.initialSets[index].weight;
-			targetReps = initialState.initialSets[index].reps;
+			if (!isMyoRepSlot(slot)) {
+				targetReps = initialState.initialSets[index].reps;
+			}
 		} else if (initialState.initialWeight !== undefined || initialState.initialReps !== undefined) {
 			targetWeight = initialState.initialWeight ?? 0;
-			targetReps = initialState.initialReps ?? targetReps;
+			if (!isMyoRepSlot(slot)) {
+				targetReps = initialState.initialReps ?? targetReps;
+			}
 		}
 
 		if (exercise?.isBodyweight) targetWeight = 0;
@@ -543,6 +574,7 @@ export async function getLastPerformance(exerciseId: string, splitDayId: string)
  * Returns per-set suggestions (weight and reps for each set).
  */
 export function calculateProgression(
+	slot: ExerciseSlot,
 	lastSets: SetLog[],
 	repGoal: number,
 	weightIncrement: number,
@@ -556,6 +588,10 @@ export function calculateProgression(
 	const completedSets = lastSets.filter(s => s.completed);
 	if (completedSets.length === 0) {
 		return lastSets.map(s => ({ suggestedWeight: s.targetWeight, suggestedReps: s.targetReps }));
+	}
+
+	if (isMyoRepSlot(slot)) {
+		return calculateMyoRepProgression(slot, completedSets, repGoal, weightIncrement, customIncrements, incrementProfile);
 	}
 
 	const lastWeight = completedSets[0].actualWeight ?? completedSets[0].targetWeight;
@@ -615,6 +651,63 @@ export function calculateProgression(
 		suggestedWeight: lastWeight,
 		suggestedReps: nextTarget
 	}));
+}
+
+function calculateMyoRepProgression(
+	slot: ExerciseSlot,
+	completedSets: SetLog[],
+	repGoal: number,
+	weightIncrement: number,
+	customIncrements?: number[],
+	incrementProfile?: IncrementProfile
+): { suggestedWeight: number; suggestedReps: number }[] {
+	const activationTarget = Math.max(1, slot.myoActivationTargetReps ?? slot.targetReps ?? repGoal);
+	const miniSetTarget = Math.max(1, slot.myoMiniSetTargetReps ?? Math.min(activationTarget, 4));
+	const miniSetCount = getMyoRepMiniSetCount(slot);
+	const setCount = miniSetCount + 1;
+	const activationSet = completedSets[0];
+	const lastWeight = activationSet.actualWeight ?? activationSet.targetWeight;
+	const manualWeightIncrease = completedSets.every(set => {
+		const actualWeight = set.actualWeight ?? set.targetWeight;
+		return actualWeight >= set.targetWeight;
+	}) && completedSets.some(set => {
+		const actualWeight = set.actualWeight ?? set.targetWeight;
+		return actualWeight > set.targetWeight;
+	});
+	const activationHit = (activationSet.actualReps ?? 0) >= activationTarget;
+	const miniSetTotal = completedSets
+		.slice(1, miniSetCount + 1)
+		.reduce((total, set) => total + (set.actualReps ?? 0), 0);
+	const requiredMiniSetTotal = miniSetTarget * miniSetCount;
+	const graduated = activationHit && miniSetTotal >= requiredMiniSetTotal;
+
+	let suggestedWeight = lastWeight;
+	if (graduated && !manualWeightIncrease) {
+		suggestedWeight = getProgressedWeight(lastWeight, weightIncrement, customIncrements, incrementProfile);
+	}
+
+	return Array.from({ length: setCount }, (_, index) => ({
+		suggestedWeight,
+		suggestedReps: index === 0 ? activationTarget : miniSetTarget
+	}));
+}
+
+function getProgressedWeight(
+	lastWeight: number,
+	weightIncrement: number,
+	customIncrements?: number[],
+	incrementProfile?: IncrementProfile
+): number {
+	if (incrementProfile) {
+		return getNextWeightInProfile(lastWeight, incrementProfile) ?? lastWeight;
+	}
+
+	if (customIncrements && customIncrements.length > 0) {
+		const sorted = [...customIncrements].sort((a, b) => a - b);
+		return lastWeight + sorted[0];
+	}
+
+	return lastWeight + weightIncrement;
 }
 
 // ─── Alternating Exercise Logic ───

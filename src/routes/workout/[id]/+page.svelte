@@ -7,6 +7,7 @@
 		finishWorkoutSession, createExerciseLog, getAlternatingExerciseId,
 		createSetLog, getSettings, getAllExerciseIdsForSlot, getLastPerformance,
 		updateExerciseSlot, deleteWorkoutSession, planExerciseTargets, type PlannedExerciseSet,
+		isMyoRepSlot,
 		updateSplitDay
 	} from '$lib/store';
 	import { db } from '$lib/db';
@@ -98,7 +99,7 @@
 				.filter(log => log.slotId === slot.id)
 				.map(async (log) => ({
 					...log,
-					exercise: await getExercise(log.exerciseId),
+					exercise: log.exerciseId ? await getExercise(log.exerciseId) : undefined,
 					sets: await getSetLogs(log.id)
 				})));
 			const activeLog = logs.find(log => log.finishedAt == null);
@@ -320,13 +321,45 @@
 		return 'border-dark-border';
 	}
 
-	function formatCompletedLogSummary(log: SessionExerciseLog, includeExerciseName: boolean): string {
+	function getSlotStructureLabel(slot: typeof slots[0]): string {
+		if (isMyoRepSlot(slot)) {
+			const miniSetCount = slot.myoMiniSetCount ?? Math.max(1, slot.targetSets - 1);
+			return `1 activation + ${miniSetCount} mini-sets`;
+		}
+
+		return `${slot.targetSets} sets`;
+	}
+
+	function getSupersetLabel(slot: typeof slots[0]): string | null {
+		if (!slot.supersetGroup) return null;
+		const groupKeys = [...new Set(slots.map(candidate => candidate.supersetGroup).filter((group): group is string => !!group))];
+		const index = groupKeys.indexOf(slot.supersetGroup);
+		return `Superset ${index >= 0 ? index + 1 : groupKeys.length + 1}`;
+	}
+
+	function getSupersetPartnerNames(slot: typeof slots[0]): string[] {
+		if (!slot.supersetGroup) return [];
+		return slots
+			.filter(candidate => candidate.id !== slot.id && candidate.supersetGroup === slot.supersetGroup)
+			.map(candidate => candidate.exercise?.name ?? 'Unknown');
+	}
+
+	function formatCompletedLogSummary(slot: typeof slots[0] | null, log: SessionExerciseLog, includeExerciseName: boolean): string {
 		const completedSets = log.sets.filter(set => set.completed);
 		const label = log.exercise?.name ?? log.customExerciseName ?? 'Custom exercise';
 		const prefix = includeExerciseName ? `${label}: ` : '';
 
 		if (completedSets.length === 0) {
 			return `${prefix}Skipped`;
+		}
+
+		if (slot && isMyoRepSlot(slot)) {
+			const [activationSet, ...miniSets] = completedSets;
+			const weight = activationSet ? (activationSet.actualWeight ?? activationSet.targetWeight) : 0;
+			const weightPrefix = weight > 0 ? `${weight}kg · ` : '';
+			const activationReps = activationSet?.actualReps ?? activationSet?.targetReps ?? 0;
+			const miniSummary = miniSets.map(set => set.actualReps ?? set.targetReps).join(', ');
+			return `${prefix}${weightPrefix}${activationReps}${miniSummary ? ` + ${miniSummary}` : ''}`;
 		}
 
 		return `${prefix}${completedSets
@@ -360,8 +393,22 @@
 			: `${plannedSet.targetReps} reps`;
 	}
 
-	function formatPlannedSetSummary(plannedSets: PlannedExerciseSet[]): string {
+	function formatPlannedSetSummary(slot: typeof slots[0], plannedSets: PlannedExerciseSet[]): string {
 		if (plannedSets.length === 0) return 'No target';
+
+		if (isMyoRepSlot(slot)) {
+			const [activationSet, ...miniSets] = plannedSets;
+			if (!activationSet) return 'No target';
+			const weightPrefix = activationSet.targetWeight > 0 ? `${activationSet.targetWeight}kg · ` : '';
+			if (miniSets.length === 0) {
+				return `${weightPrefix}${activationSet.targetReps}`;
+			}
+
+			const firstMiniTarget = miniSets[0]?.targetReps ?? 0;
+			const uniformMiniTargets = miniSets.every(set => set.targetReps === firstMiniTarget);
+			return `${weightPrefix}${activationSet.targetReps} + ${uniformMiniTargets ? `${firstMiniTarget}×${miniSets.length}` : miniSets.map(set => set.targetReps).join(', ')}`;
+		}
+
 		const [firstSet] = plannedSets;
 		const uniform = plannedSets.every(set =>
 			set.targetWeight === firstSet.targetWeight && set.targetReps === firstSet.targetReps
@@ -426,7 +473,7 @@
 				</div>
 			</div>
 		{:else}
-			<button onclick={() => { reminderNoteValue = splitDay.reminderNote ?? ''; editingReminderNote = true; }}
+			<button onclick={() => { reminderNoteValue = splitDay!.reminderNote ?? ''; editingReminderNote = true; }}
 				class="text-text-muted hover:text-accent text-xs mb-3 block"
 			>
 				+ Set reminder for next {splitDay.name}
@@ -472,21 +519,27 @@
 					</div>
 
 					<div class="text-text-secondary text-xs mb-3">
-						{slot.targetSets} sets
+						{getSlotStructureLabel(slot)}
 						{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
 							· alternates with {slot.alternateExercises.map(e => e.name).join(', ')}
 						{/if}
 						{#if slot.supersetGroup}
-							· superset
+							· {getSupersetLabel(slot)}
 						{/if}
 					</div>
+					{#if slot.supersetGroup}
+						{@const supersetPartners = getSupersetPartnerNames(slot)}
+						{#if supersetPartners.length > 0}
+							<div class="text-text-muted text-xs mb-3">Pair with {supersetPartners.join(' + ')}</div>
+						{/if}
+					{/if}
 
 					{#if slot.completedLogs && slot.completedLogs.length > 0}
 						<div class="space-y-1 mb-3">
 							{#each slot.completedLogs as completedLog}
 								<div class="flex items-start gap-2">
 									<div class="flex-1 text-xs {completedLog.sets.filter(set => set.completed).length === 0 ? 'text-text-muted italic' : 'text-text-secondary'}">
-										{formatCompletedLogSummary(completedLog, shouldIncludeExerciseName(slot, completedLog))}
+										{formatCompletedLogSummary(slot, completedLog, shouldIncludeExerciseName(slot, completedLog))}
 									</div>
 									<button
 										onclick={() => goto(`/workout/${session!.id}/exercise/${completedLog.id}`)}
@@ -514,13 +567,13 @@
 								{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
 									{#if slot.exercise && slot.availableExerciseIds.includes(slot.exerciseId) && slot.previewTargetsByExerciseId[slot.exerciseId]}
 										<div class="text-xs {slot.suggestedExerciseId === slot.exerciseId ? 'text-accent' : 'text-text-muted'}">
-											{slot.exercise.name}: {formatPlannedSetSummary(slot.previewTargetsByExerciseId[slot.exerciseId])}
+											{slot.exercise.name}: {formatPlannedSetSummary(slot, slot.previewTargetsByExerciseId[slot.exerciseId])}
 										</div>
 									{/if}
 									{#each slot.alternateExercises as alt}
 										{#if slot.availableExerciseIds.includes(alt.id) && slot.previewTargetsByExerciseId[alt.id]}
 											<div class="text-xs {slot.suggestedExerciseId === alt.id ? 'text-accent' : 'text-text-muted'}">
-												{alt.name}: {formatPlannedSetSummary(slot.previewTargetsByExerciseId[alt.id])}
+												{alt.name}: {formatPlannedSetSummary(slot, slot.previewTargetsByExerciseId[alt.id])}
 											</div>
 										{/if}
 									{/each}
@@ -528,7 +581,7 @@
 									{@const nextExerciseId = slot.availableExerciseIds[0]}
 									{@const preview = nextExerciseId ? slot.previewTargetsByExerciseId[nextExerciseId] : undefined}
 									{#if preview}
-										<div class="text-xs text-text-muted">Session target: {formatPlannedSetSummary(preview)}</div>
+										<div class="text-xs text-text-muted">Session target: {formatPlannedSetSummary(slot, preview)}</div>
 									{/if}
 								{/if}
 							</div>
@@ -629,7 +682,7 @@
 							<span class="text-sm {log.finishedAt ? 'text-success' : 'text-warning'}">{log.finishedAt ? '✓ Done' : 'In progress'}</span>
 						</div>
 						<div class="text-text-secondary text-xs mb-3">
-							{formatCompletedLogSummary(log, false)}
+							{formatCompletedLogSummary(null, log, false)}
 						</div>
 						<button
 							onclick={() => goto(`/workout/${session!.id}/exercise/${log.id}`)}
@@ -657,16 +710,17 @@
 					</select>
 					<div class="flex gap-2">
 						<div class="flex-1">
-							<label class="block text-xs text-text-secondary mb-1">Sets</label>
-							<input type="number" bind:value={extraExerciseSets} min="1" max="20" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
+							<p class="block text-xs text-text-secondary mb-1">Sets</p>
+							<input type="number" bind:value={extraExerciseSets} min="1" max="20" aria-label="Extra exercise set count" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
 						</div>
 						<div class="flex-1">
-							<label class="block text-xs text-text-secondary mb-1">Reps</label>
-							<input type="number" bind:value={extraExerciseReps} min="1" max="100" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
+							<p class="block text-xs text-text-secondary mb-1">Reps</p>
+							<input type="number" bind:value={extraExerciseReps} min="1" max="100" aria-label="Extra exercise target reps" class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border" />
 						</div>
 						<div class="flex-1">
-							<label class="block text-xs text-text-secondary mb-1">Weight</label>
+							<p class="block text-xs text-text-secondary mb-1">Weight</p>
 							<input type="number" bind:value={extraExerciseWeight} min="0" step="0.5" disabled={selectedExtraExercise?.isBodyweight ?? false}
+								aria-label="Extra exercise target weight"
 								class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border disabled:text-text-muted" />
 						</div>
 					</div>

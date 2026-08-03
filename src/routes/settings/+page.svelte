@@ -113,37 +113,40 @@
 
 		<div class="space-y-4">
 			<div>
-				<label class="block text-sm text-text-secondary mb-1">Rest timer (seconds)</label>
+				<p class="block text-sm text-text-secondary mb-1">Rest timer (seconds)</p>
 				<input
 					type="number"
 					bind:value={settings.defaultRestSeconds}
 					onchange={save}
 					min="0"
 					step="5"
+					aria-label="Default rest timer in seconds"
 					class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
 				/>
 			</div>
 
 			<div>
-				<label class="block text-sm text-text-secondary mb-1">Default rep goal</label>
+				<p class="block text-sm text-text-secondary mb-1">Default rep goal</p>
 				<input
 					type="number"
 					bind:value={settings.defaultRepTarget}
 					onchange={save}
 					min="1"
+					aria-label="Default rep goal"
 					class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
 				/>
 				<p class="text-xs text-text-muted mt-1">When all sets hit this many reps, the app suggests increasing weight.</p>
 			</div>
 
 			<div>
-				<label class="block text-sm text-text-secondary mb-1">Default weight increment (kg)</label>
+				<p class="block text-sm text-text-secondary mb-1">Default weight increment (kg)</p>
 				<input
 					type="number"
 					bind:value={settings.defaultWeightIncrement}
 					onchange={save}
 					min="0.5"
 					step="0.5"
+					aria-label="Default weight increment in kilograms"
 					class="w-full bg-dark-surface px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none"
 				/>
 			</div>

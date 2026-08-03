@@ -20,7 +20,7 @@
 	let longestStreak = $state(0);
 	let totalWorkouts = $state(0);
 
-	const sessionId = $derived($page.params.id);
+	const sessionId = $derived($page.params.id ?? '');
 
 	onMount(async () => {
 		await loadData();
@@ -140,11 +140,12 @@
 
 		<!-- Session Notes -->
 		<div class="bg-dark-card rounded-xl p-4 mb-6 text-left">
-			<label class="block text-xs text-text-muted mb-2">Session notes</label>
+			<p class="block text-xs text-text-muted mb-2">Session notes</p>
 			<textarea
 				bind:value={sessionNotes}
 				placeholder="e.g. skipped fly because of elbow pain, felt strong today..."
 				rows="3"
+				aria-label="Session notes"
 				class="w-full bg-dark-surface text-text-primary px-3 py-2 rounded-lg border border-dark-border focus:border-accent focus:outline-none resize-none text-sm"
 			></textarea>
 			<button
