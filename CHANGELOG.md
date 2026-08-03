@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/Nibaa/workout-tracker/compare/v1.4.0...v1.5.0) (2026-08-03)
+
+
+### Features
+
+* add myoreps and superset support ([64e2bac](https://github.com/Nibaa/workout-tracker/commit/64e2bac23f24f22bd9a60d2895710b60bd1d1fd0))
+
 # [1.4.0](https://github.com/Nibaa/workout-tracker/compare/v1.3.2...v1.4.0) (2026-06-23)
 
 
