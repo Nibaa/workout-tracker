@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/Nibaa/workout-tracker/compare/v1.5.0...v1.5.1) (2026-08-04)
+
+
+### Bug Fixes
+
+* reload superset exercise route state ([775140c](https://github.com/Nibaa/workout-tracker/commit/775140c40fd508a281fad860d5da35353fc14a07))
+
 # [1.5.0](https://github.com/Nibaa/workout-tracker/compare/v1.4.0...v1.5.0) (2026-08-03)
 
 
