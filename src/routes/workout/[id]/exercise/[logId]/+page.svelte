@@ -36,6 +36,7 @@
 
 	const sessionId = $derived($page.params.id ?? '');
 	const logId = $derived($page.params.logId ?? '');
+	let loadedLogId = $state('');
 
 	$effect(() => {
 		if (sets.length > 0 && currentSetIndex < sets.length) {
@@ -48,6 +49,11 @@
 	onMount(async () => {
 		settings = getSettings();
 		await loadData();
+	});
+
+	$effect(() => {
+		if (!logId || loading || loadedLogId === logId) return;
+		void loadData();
 	});
 
 	onDestroy(() => {
@@ -85,6 +91,7 @@
 		const firstIncomplete = sets.findIndex(s => !s.completed);
 		currentSetIndex = firstIncomplete >= 0 ? firstIncomplete : sets.length - 1;
 
+		loadedLogId = logId;
 		loading = false;
 	}
 
