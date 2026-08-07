@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/Nibaa/workout-tracker/compare/v1.5.1...v1.6.0) (2026-08-07)
+
+
+### Features
+
+* add split-local shared progression ([9124dbb](https://github.com/Nibaa/workout-tracker/commit/9124dbb9003fe766bd45ce74ba4b3fe66fd421be))
+
 ## [1.5.1](https://github.com/Nibaa/workout-tracker/compare/v1.5.0...v1.5.1) (2026-08-04)
 
 
