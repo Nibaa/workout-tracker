@@ -4,7 +4,8 @@ import {
 	DEFAULT_SETTINGS, DEFAULT_MUSCLE_GROUPS, PRESET_EXERCISES,
 	type Split, type SplitDay, type Exercise, type ExerciseSlot,
 	type WorkoutSession, type ExerciseLog, type SetLog, type Settings, type MuscleGroup, type Weekday,
-	type IncrementProfile, type WorkoutBreak, type BreakReason, type ExerciseSlotExerciseState
+	type IncrementProfile, type WorkoutBreak, type BreakReason, type ExerciseSlotExerciseState,
+	type RecentTargetSnapshot, type ExerciseProgressionMode
 } from '$lib/types';
 
 // ─── Settings ───
@@ -419,7 +420,7 @@ export async function planExerciseTargets(
 		}));
 	}
 
-	const last = await getLastPerformance(exerciseId, splitDayId);
+	const last = await getLastPerformanceForSlot(slot, exerciseId, splitDayId);
 	const plannedSets: PlannedExerciseSet[] = [];
 	const initialState = getExerciseInitialStateForSlot(slot, exerciseId);
 
@@ -534,9 +535,33 @@ export async function getLastPerformance(exerciseId: string, splitDayId: string)
 	reps: number;
 	sets: SetLog[];
 } | null> {
+	return getLastPerformanceByDayIds(exerciseId, [splitDayId]);
+}
+
+export async function getLastPerformanceForSlot(
+	slot: ExerciseSlot,
+	exerciseId: string,
+	splitDayId: string
+): Promise<{
+	weight: number;
+	reps: number;
+	sets: SetLog[];
+} | null> {
+	const linkedDayIds = await getLinkedProgressionDayIds(slot, exerciseId, splitDayId);
+	return getLastPerformanceByDayIds(exerciseId, linkedDayIds);
+}
+
+async function getLastPerformanceByDayIds(exerciseId: string, splitDayIds: string[]): Promise<{
+	weight: number;
+	reps: number;
+	sets: SetLog[];
+} | null> {
+	if (splitDayIds.length === 0) {
+		return null;
+	}
+
 	const sessions = await db.workoutSessions
-		.where('splitDayId').equals(splitDayId)
-		.and(s => s.status === 'completed')
+		.filter(session => splitDayIds.includes(session.splitDayId) && session.status === 'completed')
 		.reverse()
 		.sortBy('date');
 
@@ -559,6 +584,82 @@ export async function getLastPerformance(exerciseId: string, splitDayId: string)
 			}
 		}
 	}
+	return null;
+}
+
+async function getLinkedProgressionDayIds(
+	slot: ExerciseSlot,
+	exerciseId: string,
+	splitDayId: string
+): Promise<string[]> {
+	if (slot.shareProgressionWithinSplit === false) {
+		return [splitDayId];
+	}
+
+	const splitDay = await db.splitDays.get(splitDayId);
+	if (!splitDay) {
+		return [splitDayId];
+	}
+
+	const matchingSlots = (await db.exerciseSlots.where('exerciseId').equals(exerciseId).toArray())
+		.filter(candidate => candidate.shareProgressionWithinSplit !== false)
+		.filter(candidate => (candidate.progressionMode ?? 'standard') === (slot.progressionMode ?? 'standard'));
+
+	if (matchingSlots.length === 0) {
+		return [splitDayId];
+	}
+
+	const matchingDayIds = new Set(matchingSlots.map(candidate => candidate.splitDayId));
+	const splitDays = await db.splitDays.where('splitId').equals(splitDay.splitId).toArray();
+	const linkedDayIds = splitDays
+		.map(day => day.id)
+		.filter(dayId => matchingDayIds.has(dayId));
+
+	return linkedDayIds.length > 0 ? linkedDayIds : [splitDayId];
+}
+
+export async function getRecentTargetSnapshot(
+	exerciseId: string,
+	progressionMode: ExerciseProgressionMode,
+	settings: Settings
+): Promise<RecentTargetSnapshot | null> {
+	const sessions = await db.workoutSessions
+		.where('status').equals('completed')
+		.reverse()
+		.sortBy('date');
+
+	for (const session of sessions) {
+		const logs = await db.exerciseLogs
+			.where('sessionId').equals(session.id)
+			.and(log => log.exerciseId === exerciseId)
+			.toArray();
+
+		for (const log of logs) {
+			if (!log.slotId || !log.exerciseId) continue;
+			const slot = await db.exerciseSlots.get(log.slotId);
+			if (!slot) continue;
+			if ((slot.progressionMode ?? 'standard') !== progressionMode) continue;
+
+			const splitDay = await db.splitDays.get(session.splitDayId);
+			const split = await db.splits.get(session.splitId);
+			if (!splitDay || !split) continue;
+
+			const plannedSets = await planExerciseTargets(slot, log.exerciseId, session.splitDayId, splitDay.defaultRepTarget, settings);
+			if (plannedSets.length === 0) continue;
+
+			return {
+				progressionMode,
+				sourceSplitName: split.name,
+				sourceDayName: splitDay.name,
+				sourceDate: session.date,
+				plannedSets: plannedSets.map(set => ({
+					weight: set.targetWeight,
+					reps: set.targetReps
+				}))
+			};
+		}
+	}
+
 	return null;
 }
 

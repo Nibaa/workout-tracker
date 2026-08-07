@@ -62,6 +62,8 @@ export interface ExerciseSlot {
 	type: ExerciseSlotType;
 	/** How this slot's work sets are planned and progressed */
 	progressionMode?: ExerciseProgressionMode;
+	/** When true or omitted, same-exercise slots in this split can share progression history */
+	shareProgressionWithinSplit?: boolean;
 	/** Primary exercise ID */
 	exerciseId: string;
 	/** Alternate exercise IDs (for 'alternating' type — any number of alternatives) */
@@ -133,6 +135,17 @@ export interface SetLog {
 	actualReps?: number;
 	isWarmup: boolean;
 	completed: boolean;
+}
+
+export interface RecentTargetSnapshot {
+	progressionMode: ExerciseProgressionMode;
+	sourceSplitName: string;
+	sourceDayName: string;
+	sourceDate: string;
+	plannedSets: Array<{
+		weight: number;
+		reps: number;
+	}>;
 }
 
 export interface Settings {

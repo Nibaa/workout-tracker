@@ -6,11 +6,11 @@
 		getSplit, updateSplit, deleteSplit, getSplitDays, createSplitDay, updateSplitDay,
 		deleteSplitDay, getExerciseSlots, createExerciseSlot, updateExerciseSlot,
 		deleteExerciseSlot, getExercises, getMuscleGroups, getAllExerciseIdsForSlot,
-		getIncrementProfiles, getSettings, getExerciseInitialStateForSlot
+		getIncrementProfiles, getSettings, getExerciseInitialStateForSlot, getRecentTargetSnapshot
 	} from '$lib/store';
 	import type {
 		Split, SplitDay, ExerciseSlot, Exercise, MuscleGroup, ExerciseSlotType, IncrementProfile,
-		Settings, ExerciseSlotExerciseState, ExerciseProgressionMode
+		Settings, ExerciseSlotExerciseState, ExerciseProgressionMode, RecentTargetSnapshot
 	} from '$lib/types';
 	import { WEEKDAYS, WEEKDAY_LABELS, type Weekday } from '$lib/types';
 
@@ -54,11 +54,14 @@
 	let newSlotProfileId = $state('');
 	let newSlotWeightIncrements = $state('');
 	let newSlotRepTarget = $state<number | undefined>();
+	let newSlotShareProgressionWithinSplit = $state(true);
 	let newSlotSupersetSelection = $state('');
 	let newSlotInitialWeight = $state<number | undefined>();
 	let newSlotInitialReps = $state<number | undefined>();
 	let newSlotUsePerSet = $state(false);
 	let newSlotInitialSets = $state<Array<{ weight: number; reps: number }>>([]);
+	let newSlotRecentTargetSnapshot = $state<RecentTargetSnapshot | null>(null);
+	let newSlotRecentTargetMessage = $state('');
 
 	// Edit slot
 	let editingSlotId = $state<string | null>(null);
@@ -72,6 +75,7 @@
 	let editSlotProfileId = $state('');
 	let editSlotWeightIncrements = $state('');
 	let editSlotRepTarget = $state<number | undefined>();
+	let editSlotShareProgressionWithinSplit = $state(true);
 	let editSlotSupersetSelection = $state('');
 	let editSlotInitialWeight = $state<number | undefined>();
 	let editSlotInitialReps = $state<number | undefined>();
@@ -83,6 +87,8 @@
 		usePerSet: boolean;
 		initialSets: Array<{ weight: number; reps: number }>;
 	}>>({});
+	let editSlotRecentTargetSnapshot = $state<RecentTargetSnapshot | null>(null);
+	let editSlotRecentTargetMessage = $state('');
 
 	// Edit name
 	let editingName = $state(false);
@@ -164,6 +170,7 @@
 			order: day.slots.length,
 			type: newSlotType,
 			progressionMode,
+			shareProgressionWithinSplit: newSlotShareProgressionWithinSplit,
 			exerciseId: newSlotExerciseId,
 			alternateExerciseIds: altIds?.length ? altIds : undefined,
 			supersetGroup: resolveSupersetGroup(newSlotSupersetSelection),
@@ -195,11 +202,14 @@
 		newSlotProfileId = '';
 		newSlotWeightIncrements = '';
 		newSlotRepTarget = undefined;
+		newSlotShareProgressionWithinSplit = true;
 		newSlotSupersetSelection = '';
 		newSlotInitialWeight = undefined;
 		newSlotInitialReps = undefined;
 		newSlotUsePerSet = false;
 		newSlotInitialSets = [];
+		newSlotRecentTargetSnapshot = null;
+		newSlotRecentTargetMessage = '';
 		await loadData();
 	}
 
@@ -220,11 +230,14 @@
 		editSlotProfileId = slot.incrementProfileId ?? '';
 		editSlotWeightIncrements = slot.weightIncrements?.join(', ') ?? '';
 		editSlotRepTarget = slot.repTarget;
+		editSlotShareProgressionWithinSplit = slot.shareProgressionWithinSplit !== false;
 		editSlotSupersetSelection = slot.supersetGroup ?? '';
 		editSlotInitialWeight = slot.initialWeight;
 		editSlotInitialReps = slot.initialReps;
 		editSlotUsePerSet = !!slot.initialSets && slot.initialSets.length > 0;
 		editSlotInitialSets = slot.initialSets ? [...slot.initialSets] : [];
+		editSlotRecentTargetSnapshot = null;
+		editSlotRecentTargetMessage = '';
 		editSlotExerciseStates = Object.fromEntries(getAllExerciseIdsForSlot(slot).map((exerciseId) => {
 			const initialState = getExerciseInitialStateForSlot(slot, exerciseId);
 			return [exerciseId, createExerciseInitialStateDraft(initialState)];
@@ -241,6 +254,7 @@
 		const myoMiniSetCount = Math.max(1, editSlotMyoMiniSetCount);
 		const updates: Partial<Omit<ExerciseSlot, 'id'>> = {
 			progressionMode: editSlotProgressionMode,
+			shareProgressionWithinSplit: editSlotShareProgressionWithinSplit,
 			targetSets: editSlotProgressionMode === 'myoreps' ? myoMiniSetCount + 1 : editSlotSets,
 			targetReps: editSlotProgressionMode === 'myoreps' ? undefined : editSlotReps,
 			myoActivationTargetReps: editSlotProgressionMode === 'myoreps' ? Math.max(1, editSlotMyoActivationTargetReps ?? settings.defaultRepTarget) : undefined,
@@ -358,6 +372,128 @@
 
 		if (!activationTarget || !miniSetTarget) return 'Myoreps';
 		return `Myoreps ${activationTarget} + ${miniSetTarget}×${miniSetCount}`;
+	}
+
+	function getExerciseById(exerciseId: string): Exercise | undefined {
+		return allExercises.find(exercise => exercise.id === exerciseId);
+	}
+
+	function getMatchingProgressionSlots(
+		splitDayId: string,
+		exerciseId: string,
+		progressionMode: ExerciseProgressionMode,
+		currentSlotId?: string
+	): Array<{ day: typeof days[number]; slot: typeof days[number]['slots'][number] }> {
+		return days
+			.filter(day => day.id !== splitDayId)
+			.flatMap(day => day.slots.map(slot => ({ day, slot })))
+			.filter(({ slot }) => slot.id !== currentSlotId)
+			.filter(({ slot }) => slot.exerciseId === exerciseId)
+			.filter(({ slot }) => (slot.progressionMode ?? 'standard') === progressionMode);
+	}
+
+	function formatProgressionMatchSummary(
+		splitDayId: string,
+		exerciseId: string,
+		progressionMode: ExerciseProgressionMode,
+		currentSlotId?: string
+	): string {
+		const matches = getMatchingProgressionSlots(splitDayId, exerciseId, progressionMode, currentSlotId);
+		return matches.map(({ day }) => day.name).join(', ');
+	}
+
+	function formatRecentTargetSnapshot(snapshot: RecentTargetSnapshot): string {
+		const [firstSet, ...remainingSets] = snapshot.plannedSets;
+		if (!firstSet) return 'No targets';
+
+		if (snapshot.progressionMode === 'myoreps') {
+			const weightPrefix = firstSet.weight > 0 ? `${firstSet.weight}kg · ` : '';
+			return `${weightPrefix}${firstSet.reps} + ${remainingSets.map(set => set.reps).join(', ')}`;
+		}
+
+		const weightPrefix = firstSet.weight > 0 ? `${firstSet.weight}kg × ` : '';
+		return `${weightPrefix}${firstSet.reps} reps`;
+	}
+
+	function applyRecentTargetSnapshot(snapshot: RecentTargetSnapshot): {
+		progressionMode: ExerciseProgressionMode;
+		initialWeight?: number;
+		initialReps?: number;
+		usePerSet: boolean;
+		initialSets: Array<{ weight: number; reps: number }>;
+		targetReps?: number;
+		myoActivationTargetReps?: number;
+		myoMiniSetTargetReps?: number;
+		myoMiniSetCount?: number;
+	} {
+		const [firstSet, ...remainingSets] = snapshot.plannedSets;
+		const usePerSet = snapshot.progressionMode === 'standard'
+			&& snapshot.plannedSets.some(set => set.weight !== firstSet?.weight || set.reps !== firstSet?.reps);
+
+		return {
+			progressionMode: snapshot.progressionMode,
+			initialWeight: firstSet?.weight,
+			initialReps: firstSet?.reps,
+			usePerSet,
+			initialSets: usePerSet ? snapshot.plannedSets.map(set => ({ ...set })) : [],
+			targetReps: snapshot.progressionMode === 'standard' ? firstSet?.reps : undefined,
+			myoActivationTargetReps: snapshot.progressionMode === 'myoreps' ? firstSet?.reps : undefined,
+			myoMiniSetTargetReps: snapshot.progressionMode === 'myoreps' ? remainingSets[0]?.reps : undefined,
+			myoMiniSetCount: snapshot.progressionMode === 'myoreps' ? remainingSets.length : undefined
+		};
+	}
+
+	async function fetchNewSlotRecentTargets() {
+		if (!newSlotExerciseId) return;
+		newSlotRecentTargetMessage = '';
+		newSlotRecentTargetSnapshot = await getRecentTargetSnapshot(newSlotExerciseId, newSlotProgressionMode, settings);
+		if (!newSlotRecentTargetSnapshot) {
+			newSlotRecentTargetMessage = `No recent ${newSlotProgressionMode === 'myoreps' ? 'myorep' : 'straight-set'} targets found.`;
+		}
+	}
+
+	async function fetchEditSlotRecentTargets(slot: ExerciseSlot) {
+		editSlotRecentTargetMessage = '';
+		editSlotRecentTargetSnapshot = await getRecentTargetSnapshot(slot.exerciseId, editSlotProgressionMode, settings);
+		if (!editSlotRecentTargetSnapshot) {
+			editSlotRecentTargetMessage = `No recent ${editSlotProgressionMode === 'myoreps' ? 'myorep' : 'straight-set'} targets found.`;
+		}
+	}
+
+	function applyRecentTargetsToNewSlot(snapshot: RecentTargetSnapshot) {
+		const applied = applyRecentTargetSnapshot(snapshot);
+		newSlotProgressionMode = applied.progressionMode;
+		newSlotInitialWeight = applied.initialWeight;
+		newSlotInitialReps = applied.initialReps;
+		newSlotUsePerSet = applied.usePerSet;
+		newSlotInitialSets = applied.initialSets;
+		newSlotReps = applied.targetReps;
+		newSlotMyoActivationTargetReps = applied.myoActivationTargetReps;
+		newSlotMyoMiniSetTargetReps = applied.myoMiniSetTargetReps ?? 4;
+		newSlotMyoMiniSetCount = applied.myoMiniSetCount ?? 4;
+	}
+
+	function applyRecentTargetsToEditSlot(snapshot: RecentTargetSnapshot) {
+		const applied = applyRecentTargetSnapshot(snapshot);
+		editSlotProgressionMode = applied.progressionMode;
+		editSlotInitialWeight = applied.initialWeight;
+		editSlotInitialReps = applied.initialReps;
+		editSlotUsePerSet = applied.usePerSet;
+		editSlotInitialSets = applied.initialSets;
+		editSlotReps = applied.targetReps;
+		editSlotMyoActivationTargetReps = applied.myoActivationTargetReps;
+		editSlotMyoMiniSetTargetReps = applied.myoMiniSetTargetReps ?? 4;
+		editSlotMyoMiniSetCount = applied.myoMiniSetCount ?? 4;
+		const slot = days.flatMap(day => day.slots).find(candidate => candidate.id === editingSlotId);
+		if (slot?.type === 'alternating') {
+			const primaryState = editSlotExerciseStates[slot.exerciseId];
+			if (primaryState) {
+				primaryState.initialWeight = applied.initialWeight;
+				primaryState.initialReps = applied.initialReps;
+				primaryState.usePerSet = applied.usePerSet;
+				primaryState.initialSets = applied.initialSets.map(set => ({ ...set }));
+			}
+		}
 	}
 
 	function addEditExerciseInitialSet(exerciseId: string) {
@@ -532,6 +668,27 @@
 												{progressionMode}
 											</button>
 										{/each}
+									</div>
+
+									{#if slot.exercise && getMatchingProgressionSlots(day.id, slot.exerciseId, editSlotProgressionMode, slot.id).length > 0}
+										<div class="rounded-lg border border-dark-border p-3 space-y-2">
+											<label class="flex items-start gap-2 text-xs text-text-secondary">
+												<input type="checkbox" bind:checked={editSlotShareProgressionWithinSplit} class="accent-accent mt-0.5" />
+												<span>Track progression together with other {slot.exercise.name} slots in this split</span>
+											</label>
+											<p class="text-xs text-text-muted">Also used on {formatProgressionMatchSummary(day.id, slot.exerciseId, editSlotProgressionMode, slot.id)}. Only matching slots with this enabled share history.</p>
+										</div>
+									{/if}
+
+									<div class="rounded-lg border border-dark-border p-3 space-y-2">
+										<button onclick={() => fetchEditSlotRecentTargets(slot)} class="text-accent text-xs font-medium">Fetch recent targets</button>
+										{#if editSlotRecentTargetSnapshot}
+											<p class="text-xs text-text-secondary">Found {editSlotRecentTargetSnapshot.progressionMode === 'myoreps' ? 'myorep' : 'straight-set'} targets from {editSlotRecentTargetSnapshot.sourceSplitName} / {editSlotRecentTargetSnapshot.sourceDayName} on {editSlotRecentTargetSnapshot.sourceDate}</p>
+											<p class="text-xs text-text-muted">{formatRecentTargetSnapshot(editSlotRecentTargetSnapshot)}</p>
+											<button onclick={() => applyRecentTargetsToEditSlot(editSlotRecentTargetSnapshot!)} class="text-accent text-xs">Apply fetched targets</button>
+										{:else if editSlotRecentTargetMessage}
+											<p class="text-xs text-text-muted">{editSlotRecentTargetMessage}</p>
+										{/if}
 									</div>
 
 									<div>
@@ -810,7 +967,13 @@
 										{#if slot.restSeconds} · {slot.restSeconds}s rest{/if}
 										{#if slot.repTarget} · {slot.repTarget} rep goal{/if}
 										{#if slot.supersetGroup} · {getSupersetGroupLabel(day, slot.supersetGroup)}{/if}
+										{#if slot.shareProgressionWithinSplit !== false && getMatchingProgressionSlots(day.id, slot.exerciseId, slot.progressionMode ?? 'standard', slot.id).length > 0}
+											· shared progression
+										{/if}
 									</div>
+									{#if slot.shareProgressionWithinSplit !== false && getMatchingProgressionSlots(day.id, slot.exerciseId, slot.progressionMode ?? 'standard', slot.id).length > 0}
+										<div class="text-text-muted text-xs">Tracks with {formatProgressionMatchSummary(day.id, slot.exerciseId, slot.progressionMode ?? 'standard', slot.id)}</div>
+									{/if}
 									{#if getSlotProgressionSummary(slot)}
 										<div class="text-text-muted text-xs">{getSlotProgressionSummary(slot)}</div>
 									{/if}
@@ -885,6 +1048,7 @@
 
 				<!-- Add Slot -->
 				{#if addingSlotForDay === day.id}
+					{@const selectedNewSlotExercise = newSlotExerciseId ? getExerciseById(newSlotExerciseId) : undefined}
 					<div class="border border-dark-border rounded-lg p-3 space-y-3">
 						<select
 							bind:value={newSlotExerciseId}
@@ -919,6 +1083,29 @@
 								</button>
 							{/each}
 						</div>
+
+						{#if selectedNewSlotExercise && getMatchingProgressionSlots(day.id, selectedNewSlotExercise.id, newSlotProgressionMode).length > 0}
+							<div class="rounded-lg border border-dark-border p-3 space-y-2">
+								<label class="flex items-start gap-2 text-xs text-text-secondary">
+									<input type="checkbox" bind:checked={newSlotShareProgressionWithinSplit} class="accent-accent mt-0.5" />
+									<span>Track progression together with other {selectedNewSlotExercise.name} slots in this split</span>
+								</label>
+								<p class="text-xs text-text-muted">Also used on {formatProgressionMatchSummary(day.id, selectedNewSlotExercise.id, newSlotProgressionMode)}. Only matching slots with this enabled share history.</p>
+							</div>
+						{/if}
+
+						{#if newSlotExerciseId}
+							<div class="rounded-lg border border-dark-border p-3 space-y-2">
+								<button onclick={fetchNewSlotRecentTargets} class="text-accent text-xs font-medium">Fetch recent targets</button>
+								{#if newSlotRecentTargetSnapshot}
+									<p class="text-xs text-text-secondary">Found {newSlotRecentTargetSnapshot.progressionMode === 'myoreps' ? 'myorep' : 'straight-set'} targets from {newSlotRecentTargetSnapshot.sourceSplitName} / {newSlotRecentTargetSnapshot.sourceDayName} on {newSlotRecentTargetSnapshot.sourceDate}</p>
+									<p class="text-xs text-text-muted">{formatRecentTargetSnapshot(newSlotRecentTargetSnapshot)}</p>
+									<button onclick={() => applyRecentTargetsToNewSlot(newSlotRecentTargetSnapshot!)} class="text-accent text-xs">Apply fetched targets</button>
+								{:else if newSlotRecentTargetMessage}
+									<p class="text-xs text-text-muted">{newSlotRecentTargetMessage}</p>
+								{/if}
+							</div>
+						{/if}
 
 						<div class="flex gap-2">
 							{#each ['standard', 'myoreps'] as progressionMode}
@@ -1130,7 +1317,7 @@
 					</div>
 				{:else}
 					<button
-						onclick={() => { addingSlotForDay = day.id; newSlotProgressionMode = 'standard'; newSlotSupersetSelection = ''; newSlotMyoActivationTargetReps = day.defaultRepTarget ?? settings.defaultRepTarget; newSlotMyoMiniSetTargetReps = 4; newSlotMyoMiniSetCount = 4; }}
+						onclick={() => { addingSlotForDay = day.id; newSlotProgressionMode = 'standard'; newSlotShareProgressionWithinSplit = true; newSlotSupersetSelection = ''; newSlotMyoActivationTargetReps = day.defaultRepTarget ?? settings.defaultRepTarget; newSlotMyoMiniSetTargetReps = 4; newSlotMyoMiniSetCount = 4; newSlotRecentTargetSnapshot = null; newSlotRecentTargetMessage = ''; }}
 						class="w-full text-accent text-sm py-2 rounded-lg border border-dashed border-dark-border hover:border-accent transition-colors"
 					>
 						+ Add Exercise
