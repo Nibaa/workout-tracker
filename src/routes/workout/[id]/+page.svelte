@@ -5,7 +5,7 @@
 	import {
 		getExerciseSlots, getExerciseLogs, getExercise, getExercises, getSetLogs,
 		finishWorkoutSession, createExerciseLog, getAlternatingExerciseId,
-		createSetLog, getSettings, getAllExerciseIdsForSlot, getLastPerformance,
+		createSetLog, getSettings, getAllExerciseIdsForSlot, getLastPerformance, getLastPerformanceForSlot,
 		updateExerciseSlot, deleteWorkoutSession, planExerciseTargets, type PlannedExerciseSet,
 		isMyoRepSlot,
 		updateSplitDay
@@ -14,6 +14,7 @@
 	import type { WorkoutSession, SplitDay, ExerciseSlot, ExerciseLog, SetLog, Exercise, Settings } from '$lib/types';
 
 	type SessionExerciseLog = ExerciseLog & { sets: SetLog[]; exercise?: Exercise };
+	type PreviousPerformance = { weight: number; reps: number; sets: SetLog[] };
 
 	let session = $state<WorkoutSession | undefined>();
 	let splitDay = $state<SplitDay | undefined>();
@@ -22,6 +23,7 @@
 		alternateExercises?: Exercise[];
 		suggestedExerciseId?: string;
 		previewTargetsByExerciseId?: Record<string, PlannedExerciseSet[]>;
+		previousPerformanceByExerciseId?: Record<string, PreviousPerformance | null>;
 		logs?: SessionExerciseLog[];
 		activeLog?: SessionExerciseLog;
 		completedLogs?: SessionExerciseLog[];
@@ -113,6 +115,14 @@
 					] as const))
 				))
 				: undefined;
+			const previousPerformanceByExerciseId = !activeLog
+				? Object.fromEntries(await Promise.all(
+					allExerciseIds.map(async (exerciseId) => ([
+						exerciseId,
+						await getLastPerformanceForSlot(slot, exerciseId, currentSplitDay.id)
+					] as const))
+				))
+				: undefined;
 
 			return {
 				...slot,
@@ -120,6 +130,7 @@
 				alternateExercises,
 				suggestedExerciseId,
 				previewTargetsByExerciseId,
+				previousPerformanceByExerciseId,
 				logs,
 				activeLog,
 				completedLogs,
@@ -421,6 +432,33 @@
 
 		return plannedSets.map(set => `S${set.setNumber} ${formatPlannedSetValue(set)}`).join(' · ');
 	}
+
+	function formatLastPerformanceSummary(
+		slot: typeof slots[0],
+		exercise: Exercise | undefined,
+		performance: PreviousPerformance | null | undefined
+	): string | null {
+		if (!performance || performance.sets.length === 0) return null;
+
+		const [firstSet, ...remainingSets] = performance.sets;
+		const firstWeight = firstSet.actualWeight ?? firstSet.targetWeight;
+		const weightPrefix = !exercise?.isBodyweight && firstWeight > 0 ? `${firstWeight}kg x ` : '';
+
+		if (isMyoRepSlot(slot)) {
+			const activationReps = firstSet.actualReps ?? firstSet.targetReps;
+			const miniSetReps = remainingSets
+				.map(set => set.actualReps ?? set.targetReps)
+				.slice(0, 3);
+			const extraMiniSets = Math.max(0, remainingSets.length - miniSetReps.length);
+			return `${weightPrefix}${activationReps}${miniSetReps.length > 0 ? ` + ${miniSetReps.join(', ')}${extraMiniSets > 0 ? ', ...' : ''}` : ''}`;
+		}
+
+		const repSummary = performance.sets
+			.map(set => set.actualReps ?? set.targetReps)
+			.slice(0, 4);
+		const extraSets = Math.max(0, performance.sets.length - repSummary.length);
+		return `${weightPrefix}${repSummary.join(', ')}${extraSets > 0 ? ', ...' : ''}`;
+	}
 </script>
 
 <div class="max-w-lg mx-auto px-4 pt-4">
@@ -566,22 +604,38 @@
 							<div class="space-y-1 mb-3">
 								{#if slot.type === 'alternating' && slot.alternateExercises && slot.alternateExercises.length > 0}
 									{#if slot.exercise && slot.availableExerciseIds.includes(slot.exerciseId) && slot.previewTargetsByExerciseId[slot.exerciseId]}
-										<div class="text-xs {slot.suggestedExerciseId === slot.exerciseId ? 'text-accent' : 'text-text-muted'}">
-											{slot.exercise.name}: {formatPlannedSetSummary(slot, slot.previewTargetsByExerciseId[slot.exerciseId])}
+										<div class="space-y-0.5">
+											<div class="text-xs {slot.suggestedExerciseId === slot.exerciseId ? 'text-accent' : 'text-text-muted'}">
+												{slot.exercise.name}: {formatPlannedSetSummary(slot, slot.previewTargetsByExerciseId[slot.exerciseId])}
+											</div>
+											{#if slot.previousPerformanceByExerciseId?.[slot.exerciseId]}
+												<p class="text-[11px] text-text-muted">Last: {formatLastPerformanceSummary(slot, slot.exercise, slot.previousPerformanceByExerciseId[slot.exerciseId])}</p>
+											{/if}
 										</div>
 									{/if}
 									{#each slot.alternateExercises as alt}
 										{#if slot.availableExerciseIds.includes(alt.id) && slot.previewTargetsByExerciseId[alt.id]}
-											<div class="text-xs {slot.suggestedExerciseId === alt.id ? 'text-accent' : 'text-text-muted'}">
-												{alt.name}: {formatPlannedSetSummary(slot, slot.previewTargetsByExerciseId[alt.id])}
+											<div class="space-y-0.5">
+												<div class="text-xs {slot.suggestedExerciseId === alt.id ? 'text-accent' : 'text-text-muted'}">
+													{alt.name}: {formatPlannedSetSummary(slot, slot.previewTargetsByExerciseId[alt.id])}
+												</div>
+												{#if slot.previousPerformanceByExerciseId?.[alt.id]}
+													<p class="text-[11px] text-text-muted">Last: {formatLastPerformanceSummary(slot, alt, slot.previousPerformanceByExerciseId[alt.id])}</p>
+												{/if}
 											</div>
 										{/if}
 									{/each}
 								{:else}
 									{@const nextExerciseId = slot.availableExerciseIds[0]}
 									{@const preview = nextExerciseId ? slot.previewTargetsByExerciseId[nextExerciseId] : undefined}
+									{@const previousPerformance = nextExerciseId ? slot.previousPerformanceByExerciseId?.[nextExerciseId] : undefined}
 									{#if preview}
-										<div class="text-xs text-text-muted">Session target: {formatPlannedSetSummary(slot, preview)}</div>
+										<div class="space-y-0.5">
+											<div class="text-xs text-text-muted">Session target: {formatPlannedSetSummary(slot, preview)}</div>
+											{#if previousPerformance}
+												<p class="text-[11px] text-text-muted">Last: {formatLastPerformanceSummary(slot, slot.exercise, previousPerformance)}</p>
+											{/if}
+										</div>
 									{/if}
 								{/if}
 							</div>

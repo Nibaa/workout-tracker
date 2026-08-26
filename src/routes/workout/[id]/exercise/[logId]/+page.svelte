@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import {
 		getSetLogs, updateSetLog, finishExerciseLog, getExercise, getSettings,
-		getIncrementProfile, getNextWeightInProfile, getPrevWeightInProfile, getLastPerformance,
+		getIncrementProfile, getNextWeightInProfile, getPrevWeightInProfile, getLastPerformance, getLastPerformanceForSlot,
 		isMyoRepSlot, getExerciseLogs, getExerciseSlots, createExerciseLog, createSetLog,
 		planExerciseTargets, getAlternatingExerciseId, updateExerciseSlot
 	} from '$lib/store';
@@ -82,7 +82,9 @@
 		}
 		sets = await getSetLogs(logId);
 		if (workoutSession && exerciseLog.exerciseId) {
-			previousPerformance = await getLastPerformance(exerciseLog.exerciseId, workoutSession.splitDayId);
+			previousPerformance = slot
+				? await getLastPerformanceForSlot(slot, exerciseLog.exerciseId, workoutSession.splitDayId)
+				: await getLastPerformance(exerciseLog.exerciseId, workoutSession.splitDayId);
 		} else {
 			previousPerformance = null;
 		}
@@ -220,6 +222,7 @@
 	async function finalizeExercise() {
 		if (!exerciseLog) return;
 		await finishExerciseLog(exerciseLog.id);
+		await finishCompletedSupersetLogs();
 		const nextSupersetLogId = await getNextSupersetLogId();
 		if (nextSupersetLogId && nextSupersetLogId !== exerciseLog.id) {
 			goto(`/workout/${sessionId}/exercise/${nextSupersetLogId}`);
@@ -290,6 +293,71 @@
 	function getSupersetSummary(): string | null {
 		if (!slot?.supersetGroup) return null;
 		return 'Superset exercise';
+	}
+
+	function getPreviousPerformanceSummary(): string | null {
+		if (!previousPerformance || previousPerformance.sets.length === 0) return null;
+
+		const [firstSet, ...remainingSets] = previousPerformance.sets;
+		const firstWeight = firstSet.actualWeight ?? firstSet.targetWeight;
+		const weightPrefix = !isBodyweight && firstWeight > 0 ? `${firstWeight}kg x ` : '';
+
+		if (slot && isMyoRepSlot(slot)) {
+			const activationReps = firstSet.actualReps ?? firstSet.targetReps;
+			const miniSetReps = remainingSets
+				.map(set => set.actualReps ?? set.targetReps)
+				.filter(reps => reps !== undefined)
+				.slice(0, 3);
+			const extraMiniSets = Math.max(0, remainingSets.length - miniSetReps.length);
+			const miniSetSummary = miniSetReps.length > 0
+				? ` + ${miniSetReps.join(', ')}${extraMiniSets > 0 ? ', ...' : ''}`
+				: '';
+			return `${weightPrefix}${activationReps}${miniSetSummary}`;
+		}
+
+		const repSummary = previousPerformance.sets
+			.map(set => set.actualReps ?? set.targetReps)
+			.filter(reps => reps !== undefined)
+			.slice(0, 4);
+		const extraSets = Math.max(0, previousPerformance.sets.length - repSummary.length);
+		return `${weightPrefix}${repSummary.join(', ')}${extraSets > 0 ? ', ...' : ''}`;
+	}
+
+	async function finishCompletedSupersetLogs() {
+		if (!allDone || !exerciseLog?.slotId || !slot?.supersetGroup || !sessionId) {
+			return;
+		}
+
+		const currentSlot = slot;
+
+		const workoutSession = await db.workoutSessions.get(sessionId);
+		if (!workoutSession) {
+			return;
+		}
+
+		const supersetSlots = (await getExerciseSlots(workoutSession.splitDayId))
+			.filter(candidate => candidate.supersetGroup === currentSlot.supersetGroup);
+
+		if (supersetSlots.length < 2) {
+			return;
+		}
+
+		const logs = await getExerciseLogs(workoutSession.id);
+		for (const candidateLog of logs) {
+			if (!candidateLog.slotId || candidateLog.id === exerciseLog.id || candidateLog.finishedAt) {
+				continue;
+			}
+
+			const matchesSuperset = supersetSlots.some(candidateSlot => candidateSlot.id === candidateLog.slotId);
+			if (!matchesSuperset) {
+				continue;
+			}
+
+			const candidateSets = await getSetLogs(candidateLog.id);
+			if (candidateSets.length > 0 && candidateSets.every(candidateSet => candidateSet.completed)) {
+				await finishExerciseLog(candidateLog.id);
+			}
+		}
 	}
 
 	async function getNextSupersetLogId(completedSetIndex?: number): Promise<string | null> {
@@ -419,6 +487,9 @@
 				{/if}
 				{#if getSupersetSummary()}
 					<p class="text-text-secondary text-xs mt-1">{getSupersetSummary()}</p>
+				{/if}
+				{#if getPreviousPerformanceSummary()}
+					<p class="text-text-secondary text-xs mt-1">Last time: {getPreviousPerformanceSummary()}</p>
 				{/if}
 			</div>
 			<button
