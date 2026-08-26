@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/Nibaa/workout-tracker/compare/v1.6.0...v1.7.0) (2026-08-26)
+
+
+### Features
+
+* show last exercise summary in workout views ([58630b1](https://github.com/Nibaa/workout-tracker/commit/58630b1fb8297c0459970f89ed0d25f554b018ac))
+
 # [1.6.0](https://github.com/Nibaa/workout-tracker/compare/v1.5.1...v1.6.0) (2026-08-07)
 
 
